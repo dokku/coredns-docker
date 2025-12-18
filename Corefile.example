@@ -1,0 +1,11 @@
+docker.localhost:1053 {
+    errors
+    debug
+    health
+    log
+    docker docker.localhost {
+        ttl 10
+    }
+    prometheus :9153
+    cache 30
+}
