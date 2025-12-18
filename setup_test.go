@@ -2,17 +2,19 @@ package docker
 
 import (
 	"testing"
+	"time"
 
 	"github.com/coredns/caddy"
 )
 
 func TestParse(t *testing.T) {
 	tests := []struct {
-		input          string
-		shouldErr      bool
-		expectedTTL    uint32
-		expectedDomain string
-		expectedPrefix string
+		input           string
+		shouldErr       bool
+		expectedTTL     uint32
+		expectedDomain  string
+		expectedPrefix  string
+		expectedBackoff time.Duration
 	}{
 		{
 			`docker`,
@@ -20,6 +22,7 @@ func TestParse(t *testing.T) {
 			DefaultTTL,
 			"docker.",
 			"com.dokku.coredns-docker",
+			60 * time.Second,
 		},
 		{
 			`docker example.org`,
@@ -27,16 +30,19 @@ func TestParse(t *testing.T) {
 			DefaultTTL,
 			"example.org.",
 			"com.dokku.coredns-docker",
+			60 * time.Second,
 		},
 		{
 			`docker example.org {
 				ttl 60
 				label_prefix com.example
+				max_backoff 30s
 			}`,
 			false,
 			60,
 			"example.org.",
 			"com.example",
+			30 * time.Second,
 		},
 		{
 			`docker example.org {
@@ -46,6 +52,7 @@ func TestParse(t *testing.T) {
 			DefaultTTL,
 			"example.org.",
 			"",
+			60 * time.Second,
 		},
 		{
 			`docker {
@@ -55,6 +62,7 @@ func TestParse(t *testing.T) {
 			0,
 			"",
 			"",
+			0,
 		},
 		{
 			`docker {
@@ -64,6 +72,7 @@ func TestParse(t *testing.T) {
 			0,
 			"",
 			"",
+			0,
 		},
 	}
 
@@ -73,6 +82,7 @@ func TestParse(t *testing.T) {
 			ttl:         DefaultTTL,
 			domain:      "docker.",
 			labelPrefix: "com.dokku.coredns-docker",
+			maxBackoff:  60 * time.Second,
 		}
 		err := parse(c, d)
 
@@ -98,6 +108,10 @@ func TestParse(t *testing.T) {
 
 		if d.labelPrefix != test.expectedPrefix {
 			t.Errorf("Test %d: expected prefix %s, got %s", i, test.expectedPrefix, d.labelPrefix)
+		}
+
+		if d.maxBackoff != test.expectedBackoff {
+			t.Errorf("Test %d: expected backoff %v, got %v", i, test.expectedBackoff, d.maxBackoff)
 		}
 	}
 }

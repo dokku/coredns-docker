@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/coredns/coredns/plugin"
 	"github.com/coredns/coredns/plugin/metrics"
@@ -35,6 +36,7 @@ type Docker struct {
 	client      *client.Client
 	domain      string
 	labelPrefix string
+	maxBackoff  time.Duration
 
 	mu      sync.RWMutex
 	records map[string][]net.IP
@@ -134,9 +136,6 @@ func (d *Docker) Name() string { return pluginName }
 func (d *Docker) startEventLoop(ctx context.Context) {
 	log.Infof("Starting Docker event loop")
 
-	// Initial sync
-	d.syncRecords(ctx)
-
 	filter := filters.NewArgs()
 	filter.Add("type", "container")
 	filter.Add("event", "start")
@@ -146,21 +145,42 @@ func (d *Docker) startEventLoop(ctx context.Context) {
 	filter.Add("event", "create")
 	filter.Add("event", "restart")
 
-	msgs, errs := d.client.Events(ctx, events.ListOptions{
-		Filters: filter,
-	})
+	backoff := 1 * time.Second
 
 	for {
+		// Sync records whenever we (re)connect
+		d.syncRecords(ctx)
+
+		msgs, errs := d.client.Events(ctx, events.ListOptions{
+			Filters: filter,
+		})
+
+		stopped := false
+		for !stopped {
+			select {
+			case <-ctx.Done():
+				return
+			case err := <-errs:
+				if err != nil && err != context.Canceled {
+					log.Errorf("Docker event error: %v", err)
+				}
+				stopped = true
+			case msg := <-msgs:
+				log.Debugf("Docker event: %s %s %s", msg.Type, msg.Action, msg.Actor.ID)
+				d.syncRecords(ctx)
+				backoff = 1 * time.Second // Reset backoff on successful event
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			return
-		case err := <-errs:
-			log.Errorf("Docker event error: %v", err)
-			// TODO: exponential backoff reconnect
-			return
-		case msg := <-msgs:
-			log.Debugf("Docker event: %s %s %s", msg.Type, msg.Action, msg.Actor.ID)
-			d.syncRecords(ctx)
+		case <-time.After(backoff):
+			log.Infof("Attempting to reconnect to Docker daemon after %v...", backoff)
+			backoff *= 2
+			if backoff > d.maxBackoff {
+				backoff = d.maxBackoff
+			}
 		}
 	}
 }

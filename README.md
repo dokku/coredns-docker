@@ -39,6 +39,7 @@ make
 docker [DOMAIN] {
     ttl DURATION
     label_prefix PREFIX
+    max_backoff DURATION
 }
 ```
 
@@ -47,6 +48,8 @@ docker [DOMAIN] {
 - `ttl` allows you to set a custom TTL for responses. **DURATION** defaults to `30 seconds`. The minimum TTL allowed is `0` seconds, and the maximum is capped at `3600` seconds. Setting TTL to 0 will prevent records from being cached. The unit for the value is seconds.
 
 - `label_prefix` allows you to set a custom prefix for SRV record labels. **PREFIX** defaults to `com.dokku.coredns-docker`.
+
+- `max_backoff` allows you to set a maximum backoff duration for the Docker event loop reconnection logic. **DURATION** defaults to `60s`.
 
 ## Metrics
 

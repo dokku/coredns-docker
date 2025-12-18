@@ -3,8 +3,10 @@ docker:1053 {
     debug
     health
     log
-    docker {
+    docker docker.localhost {
         ttl 10
+        label_prefix com.dokku.coredns-docker
+        max_backoff 30s
     }
     prometheus :9153
     cache 30

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"strconv"
+	"time"
 
 	"github.com/coredns/caddy"
 	"github.com/coredns/coredns/core/dnsserver"
@@ -22,6 +23,7 @@ func setup(c *caddy.Controller) error {
 		srvs:        make(map[string][]srvRecord),
 		domain:      "docker.",
 		labelPrefix: "com.dokku.coredns-docker",
+		maxBackoff:  60 * time.Second,
 	}
 	if err := parse(c, d); err != nil {
 		return plugin.Error(pluginName, err)
@@ -91,6 +93,15 @@ func parse(c *caddy.Controller, d *Docker) error {
 					return c.ArgErr()
 				}
 				d.labelPrefix = c.Val()
+			case "max_backoff":
+				if !c.NextArg() {
+					return c.ArgErr()
+				}
+				dur, err := time.ParseDuration(c.Val())
+				if err != nil {
+					return c.Errf("error parsing max_backoff: %v", err)
+				}
+				d.maxBackoff = dur
 			default:
 				return c.Errf("unknown property '%s'", selector)
 			}
