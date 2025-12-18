@@ -38,9 +38,10 @@ type Docker struct {
 	labelPrefix string
 	maxBackoff  time.Duration
 
-	mu      sync.RWMutex
-	records map[string][]net.IP
-	srvs    map[string][]srvRecord
+	mu        sync.RWMutex
+	records   map[string][]net.IP
+	srvs      map[string][]srvRecord
+	connected bool
 }
 
 type srvRecord struct {
@@ -155,6 +156,10 @@ func (d *Docker) startEventLoop(ctx context.Context) {
 			Filters: filter,
 		})
 
+		d.mu.Lock()
+		d.connected = true
+		d.mu.Unlock()
+
 		stopped := false
 		for !stopped {
 			select {
@@ -164,6 +169,9 @@ func (d *Docker) startEventLoop(ctx context.Context) {
 				if err != nil && err != context.Canceled {
 					log.Errorf("Docker event error: %v", err)
 				}
+				d.mu.Lock()
+				d.connected = false
+				d.mu.Unlock()
 				stopped = true
 			case msg := <-msgs:
 				log.Debugf("Docker event: %s %s %s", msg.Type, msg.Action, msg.Actor.ID)

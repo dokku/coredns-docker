@@ -1,4 +1,7 @@
 docker:1053 {
+    ready {
+        monitor continuously
+    }
     errors
     debug
     health

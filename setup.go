@@ -41,6 +41,7 @@ func setup(c *caddy.Controller) error {
 	if err != nil {
 		return plugin.Error(pluginName, err)
 	}
+	d.connected = true
 
 	ctx, cancel := context.WithCancel(context.Background())
 	c.OnStartup(func() error {
