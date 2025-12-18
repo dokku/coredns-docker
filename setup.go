@@ -17,9 +17,11 @@ func init() { plugin.Register(pluginName, setup) }
 // setup is the function that gets called when the config parser see the token "docker".
 func setup(c *caddy.Controller) error {
 	d := &Docker{
-		ttl:     DefaultTTL,
-		records: make(map[string][]net.IP),
-		domain:  "docker.",
+		ttl:         DefaultTTL,
+		records:     make(map[string][]net.IP),
+		srvs:        make(map[string][]srvRecord),
+		domain:      "docker.",
+		labelPrefix: "com.dokku.coredns-docker",
 	}
 	if err := parse(c, d); err != nil {
 		return plugin.Error(pluginName, err)
@@ -84,6 +86,11 @@ func parse(c *caddy.Controller, d *Docker) error {
 					return c.Errf("ttl must be in range [0, 3600]: %d", t)
 				}
 				d.ttl = uint32(t)
+			case "label_prefix":
+				if !c.NextArg() {
+					return c.ArgErr()
+				}
+				d.labelPrefix = c.Val()
 			default:
 				return c.Errf("unknown property '%s'", selector)
 			}

@@ -8,7 +8,14 @@
 
 The docker plugin serves DNS records for containers running on the local Docker daemon. It follows the Docker event stream, picking up changes whenever something happens to a container - whether it gets created, started, deleted, or restarted.
 
-The plugin resolves container names, network aliases, and DNS names to their respective container IP addresses within a specified network.
+The plugin resolves container names, network aliases, DNS names, and SRV records to their respective container IP addresses within a specified network.
+
+SRV records can be defined using container labels with the prefix `[LABEL_PREFIX].srv.`, followed by the protocol and service name. For example, with the default prefix, a label `com.dokku.coredns-docker.srv._tcp._http=80` will create an SRV record for `_http._tcp.container-name.domain` pointing to the container's IP on port 80.
+
+If no labels with the specified prefix are found, the plugin falls back to using the container's exposed ports (`NetworkSettings.Ports`).
+
+- For a port mapping like `80/tcp`, it generates an SRV record for `_tcp._tcp.container-name.domain`.
+- For a port mapping without a protocol like `80`, it generates SRV records for both `_tcp._tcp` and `_udp._udp`.
 
 ## Compilation
 
@@ -31,19 +38,22 @@ make
 ```text
 docker [DOMAIN] {
     ttl DURATION
+    label_prefix PREFIX
 }
 ```
 
-* `DOMAIN` is the domain for which the plugin will respond. Defaults to `docker.`.
+- `DOMAIN` is the domain for which the plugin will respond. Defaults to `docker.`.
 
-* `ttl` allows you to set a custom TTL for responses. **DURATION** defaults to `30 seconds`. The minimum TTL allowed is `0` seconds, and the maximum is capped at `3600` seconds. Setting TTL to 0 will prevent records from being cached. The unit for the value is seconds.
+- `ttl` allows you to set a custom TTL for responses. **DURATION** defaults to `30 seconds`. The minimum TTL allowed is `0` seconds, and the maximum is capped at `3600` seconds. Setting TTL to 0 will prevent records from being cached. The unit for the value is seconds.
+
+- `label_prefix` allows you to set a custom prefix for SRV record labels. **PREFIX** defaults to `com.dokku.coredns-docker`.
 
 ## Metrics
 
 If monitoring is enabled (via the *prometheus* directive) the following metric is exported:
 
-* `coredns_docker_success_requests_total{server}` - Counter of DNS requests handled successfully.
-* `coredns_docker_failed_requests_total{server}` - Counter of DNS requests failed.
+- `coredns_docker_success_requests_total{server}` - Counter of DNS requests handled successfully.
+- `coredns_docker_failed_requests_total{server}` - Counter of DNS requests failed.
 
 The `server` label indicated which server handled the request.
 
@@ -84,5 +94,26 @@ dig web.docker @127.0.0.1 -p 1053
 web.docker. 30 IN A 172.17.0.2
 
 ;; Query time: 4 msec
+;; SERVER: 127.0.0.1#1053(127.0.0.1) (UDP)
+```
+
+### SRV record
+
+```shell
+dig _http._tcp.web.docker @127.0.0.1 -p 1053 SRV
+
+; <<>> DiG 9.18.1-1ubuntu1.2-Ubuntu <<>> _http._tcp.web.docker @127.0.0.1 -p 1053 SRV
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 49945
+;; flags: qr aa rd; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 0
+
+;; QUESTION SECTION:
+;_http._tcp.web.docker.  IN SRV
+
+;; ANSWER SECTION:
+_http._tcp.web.docker. 30 IN SRV 10 10 80 web.docker.
+
+;; Query time: 0 msec
 ;; SERVER: 127.0.0.1#1053(127.0.0.1) (UDP)
 ```

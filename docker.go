@@ -31,12 +31,19 @@ const DefaultTTL = uint32(30)
 type Docker struct {
 	Next plugin.Handler
 
-	ttl    uint32
-	client *client.Client
-	domain string
+	ttl         uint32
+	client      *client.Client
+	domain      string
+	labelPrefix string
 
 	mu      sync.RWMutex
 	records map[string][]net.IP
+	srvs    map[string][]srvRecord
+}
+
+type srvRecord struct {
+	target string
+	port   uint16
 }
 
 // ServeDNS implements the plugin.Handler interface.
@@ -51,9 +58,10 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 
 	d.mu.RLock()
 	ips, ok := d.records[qname]
+	srvs, srvOk := d.srvs[qname]
 	d.mu.RUnlock()
 
-	if !ok {
+	if !ok && !srvOk {
 		return plugin.NextOrFailure(d.Name(), d.Next, ctx, w, r)
 	}
 
@@ -71,25 +79,40 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	}
 
 	found := false
-	for _, ip := range ips {
-		if qtype == dns.TypeA && ip.To4() != nil {
-			m.Answer = append(m.Answer, &dns.A{
-				Hdr: header,
-				A:   ip,
-			})
-			found = true
-		} else if qtype == dns.TypeAAAA && ip.To4() == nil {
-			m.Answer = append(m.Answer, &dns.AAAA{
-				Hdr:  header,
-				AAAA: ip,
+	if qtype == dns.TypeSRV {
+		for _, srv := range srvs {
+			m.Answer = append(m.Answer, &dns.SRV{
+				Hdr:      header,
+				Priority: 10,
+				Weight:   10,
+				Port:     srv.port,
+				Target:   srv.target,
 			})
 			found = true
 		}
+	} else {
+		for _, ip := range ips {
+			if qtype == dns.TypeA && ip.To4() != nil {
+				m.Answer = append(m.Answer, &dns.A{
+					Hdr: header,
+					A:   ip,
+				})
+				found = true
+			} else if qtype == dns.TypeAAAA && ip.To4() == nil {
+				m.Answer = append(m.Answer, &dns.AAAA{
+					Hdr:  header,
+					AAAA: ip,
+				})
+				found = true
+			}
+		}
 	}
 
-	if !found && (qtype == dns.TypeA || qtype == dns.TypeAAAA) {
+	if !found && (qtype == dns.TypeA || qtype == dns.TypeAAAA || qtype == dns.TypeSRV) {
 		// NODATA
-		w.WriteMsg(m)
+		if err := w.WriteMsg(m); err != nil {
+			log.Errorf("Failed to write message: %v", err)
+		}
 		return dns.RcodeSuccess, nil
 	}
 
@@ -98,7 +121,9 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 		return plugin.NextOrFailure(d.Name(), d.Next, ctx, w, r)
 	}
 
-	w.WriteMsg(m)
+	if err := w.WriteMsg(m); err != nil {
+		log.Errorf("Failed to write message: %v", err)
+	}
 	requestSuccessCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
 	return dns.RcodeSuccess, nil
 }
@@ -148,6 +173,7 @@ func (d *Docker) syncRecords(ctx context.Context) {
 	}
 
 	newRecords := make(map[string][]net.IP)
+	newSrvs := make(map[string][]srvRecord)
 
 	for _, c := range containers {
 		inspect, err := d.client.ContainerInspect(ctx, c.ID)
@@ -186,6 +212,49 @@ func (d *Docker) syncRecords(ctx context.Context) {
 			names = append(names, project+"."+service)
 		}
 
+		// Add SRV records based on labels
+		srvPrefix := d.labelPrefix + ".srv."
+		if d.labelPrefix == "" {
+			srvPrefix = "srv."
+		}
+
+		containerSrvs := make(map[string]uint16)
+		for k, v := range inspect.Config.Labels {
+			if !strings.HasPrefix(k, srvPrefix) {
+				continue
+			}
+			parts := strings.Split(strings.TrimPrefix(k, srvPrefix), ".")
+			if len(parts) != 2 {
+				continue
+			}
+			port, err := strconv.Atoi(v)
+			if err != nil {
+				continue
+			}
+			// key: _service._proto
+			containerSrvs[strings.ToLower(parts[1]+"."+parts[0])] = uint16(port)
+		}
+
+		// Fallback to NetworkSettings.Ports if no labels found
+		if len(containerSrvs) == 0 {
+			for p := range inspect.NetworkSettings.Ports {
+				portStr := string(p)
+				parts := strings.Split(portStr, "/")
+				port, err := strconv.Atoi(parts[0])
+				if err != nil {
+					continue
+				}
+				if len(parts) > 1 {
+					// key: _proto._proto
+					proto := strings.ToLower(parts[1])
+					containerSrvs["_"+proto+"._"+proto] = uint16(port)
+				} else {
+					containerSrvs["_tcp._tcp"] = uint16(port)
+					containerSrvs["_udp._udp"] = uint16(port)
+				}
+			}
+		}
+
 		for _, name := range names {
 			if name == "" {
 				continue
@@ -195,11 +264,20 @@ func (d *Docker) syncRecords(ctx context.Context) {
 				fqdn += "."
 			}
 			newRecords[fqdn] = append(newRecords[fqdn], ip)
+
+			for srvKey, port := range containerSrvs {
+				srvName := srvKey + "." + fqdn
+				newSrvs[srvName] = append(newSrvs[srvName], srvRecord{
+					target: fqdn,
+					port:   port,
+				})
+			}
 		}
 	}
 
 	d.mu.Lock()
 	d.records = newRecords
+	d.srvs = newSrvs
 	d.mu.Unlock()
-	log.Debugf("Synced %d records", len(newRecords))
+	log.Debugf("Synced %d records and %d SRV records", len(newRecords), len(newSrvs))
 }

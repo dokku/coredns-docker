@@ -22,6 +22,17 @@ func TestDocker(t *testing.T) {
 			"multi.docker.":        {net.ParseIP("172.17.0.4"), net.ParseIP("172.17.0.5")},
 			"myproj.mysvc.docker.": {net.ParseIP("172.17.0.6")},
 		},
+		srvs: map[string][]srvRecord{
+			"_http._tcp.web.docker.": {
+				{target: "web.docker.", port: 80},
+			},
+			"_tcp._tcp.db.docker.": {
+				{target: "db.docker.", port: 5432},
+			},
+			"_udp._udp.db.docker.": {
+				{target: "db.docker.", port: 5432},
+			},
+		},
 	}
 
 	var cases = []test.Case{
@@ -67,6 +78,30 @@ func TestDocker(t *testing.T) {
 			},
 		},
 		{
+			Qname: "_http._tcp.web.docker.",
+			Qtype: dns.TypeSRV,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.SRV("_http._tcp.web.docker.	30	IN	SRV	10 10 80 web.docker."),
+			},
+		},
+		{
+			Qname: "_tcp._tcp.db.docker.",
+			Qtype: dns.TypeSRV,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.SRV("_tcp._tcp.db.docker.	30	IN	SRV	10 10 5432 db.docker."),
+			},
+		},
+		{
+			Qname: "_udp._udp.db.docker.",
+			Qtype: dns.TypeSRV,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.SRV("_udp._udp.db.docker.	30	IN	SRV	10 10 5432 db.docker."),
+			},
+		},
+		{
 			Qname:  "nonexistent.docker.",
 			Qtype:  dns.TypeA,
 			Rcode:  dns.RcodeServerFailure, // Because Next is ErrorHandler
@@ -96,5 +131,40 @@ func TestDocker(t *testing.T) {
 		if err := test.SortAndCheck(w.Msg, tc); err != nil {
 			t.Errorf("Test %d: %v", i, err)
 		}
+	}
+}
+
+func TestDockerEmptyPrefix(t *testing.T) {
+	d := &Docker{
+		Next:        test.ErrorHandler(),
+		ttl:         DefaultTTL,
+		domain:      "docker.",
+		labelPrefix: "",
+		srvs: map[string][]srvRecord{
+			"_http._tcp.web.docker.": {
+				{target: "web.docker.", port: 80},
+			},
+		},
+	}
+
+	tc := test.Case{
+		Qname: "_http._tcp.web.docker.",
+		Qtype: dns.TypeSRV,
+		Rcode: dns.RcodeSuccess,
+		Answer: []dns.RR{
+			test.SRV("_http._tcp.web.docker.	30	IN	SRV	10 10 80 web.docker."),
+		},
+	}
+
+	r := tc.Msg()
+	w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+	_, err := d.ServeDNS(context.Background(), w, r)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+
+	if err := test.SortAndCheck(w.Msg, tc); err != nil {
+		t.Errorf("error: %v", err)
 	}
 }
