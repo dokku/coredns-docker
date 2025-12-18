@@ -16,10 +16,11 @@ func TestDocker(t *testing.T) {
 		ttl:    DefaultTTL,
 		domain: "docker.",
 		records: map[string][]net.IP{
-			"web.docker.":   {net.ParseIP("172.17.0.2")},
-			"db.docker.":    {net.ParseIP("172.17.0.3")},
-			"ipv6.docker.":  {net.ParseIP("2001:db8::1")},
-			"multi.docker.": {net.ParseIP("172.17.0.4"), net.ParseIP("172.17.0.5")},
+			"web.docker.":          {net.ParseIP("172.17.0.2")},
+			"db.docker.":           {net.ParseIP("172.17.0.3")},
+			"ipv6.docker.":         {net.ParseIP("2001:db8::1")},
+			"multi.docker.":        {net.ParseIP("172.17.0.4"), net.ParseIP("172.17.0.5")},
+			"myproj.mysvc.docker.": {net.ParseIP("172.17.0.6")},
 		},
 	}
 
@@ -55,6 +56,14 @@ func TestDocker(t *testing.T) {
 			Answer: []dns.RR{
 				test.A("multi.docker.	30	IN	A	172.17.0.4"),
 				test.A("multi.docker.	30	IN	A	172.17.0.5"),
+			},
+		},
+		{
+			Qname: "myproj.mysvc.docker.",
+			Qtype: dns.TypeA,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.A("myproj.mysvc.docker.	30	IN	A	172.17.0.6"),
 			},
 		},
 		{

@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -177,6 +178,13 @@ func (d *Docker) syncRecords(ctx context.Context) {
 		}
 		names = append(names, network.Aliases...)
 		names = append(names, network.DNSNames...)
+
+		// Add Compose project/service alias if present
+		project := inspect.Config.Labels["com.docker.compose.project"]
+		service := inspect.Config.Labels["com.docker.compose.service"]
+		if project != "" && service != "" {
+			names = append(names, project+"."+service)
+		}
 
 		for _, name := range names {
 			if name == "" {
