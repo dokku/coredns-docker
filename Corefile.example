@@ -1,9 +1,9 @@
-docker.localhost:1053 {
+docker:1053 {
     errors
     debug
     health
     log
-    docker docker.localhost {
+    docker {
         ttl 10
     }
     prometheus :9153
