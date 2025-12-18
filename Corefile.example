@@ -10,6 +10,7 @@ docker:1053 {
         ttl 10
         label_prefix com.dokku.coredns-docker
         max_backoff 30s
+        networks bridge my-custom-network
     }
     prometheus :9153
     cache 30

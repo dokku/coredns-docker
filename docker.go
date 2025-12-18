@@ -37,6 +37,7 @@ type Docker struct {
 	domain      string
 	labelPrefix string
 	maxBackoff  time.Duration
+	networks    []string
 
 	mu        sync.RWMutex
 	records   map[string][]net.IP
@@ -213,6 +214,20 @@ func (d *Docker) syncRecords(ctx context.Context) {
 		networkName := string(inspect.HostConfig.NetworkMode)
 		if networkName == "" || networkName == "default" {
 			networkName = "bridge"
+		}
+
+		if len(d.networks) > 0 {
+			found := false
+			for _, n := range d.networks {
+				if n == networkName {
+					found = true
+					break
+				}
+			}
+			if !found {
+				log.Debugf("Container %s not on any allowed network (on %s)", c.ID, networkName)
+				continue
+			}
 		}
 
 		network, ok := inspect.NetworkSettings.Networks[networkName]

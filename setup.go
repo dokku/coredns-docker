@@ -103,6 +103,11 @@ func parse(c *caddy.Controller, d *Docker) error {
 					return c.Errf("error parsing max_backoff: %v", err)
 				}
 				d.maxBackoff = dur
+			case "networks":
+				d.networks = c.RemainingArgs()
+				if len(d.networks) == 0 {
+					return c.ArgErr()
+				}
 			default:
 				return c.Errf("unknown property '%s'", selector)
 			}

@@ -9,12 +9,13 @@ import (
 
 func TestParse(t *testing.T) {
 	tests := []struct {
-		input           string
-		shouldErr       bool
-		expectedTTL     uint32
-		expectedDomain  string
-		expectedPrefix  string
-		expectedBackoff time.Duration
+		input            string
+		shouldErr        bool
+		expectedTTL      uint32
+		expectedDomain   string
+		expectedPrefix   string
+		expectedBackoff  time.Duration
+		expectedNetworks []string
 	}{
 		{
 			`docker`,
@@ -23,6 +24,7 @@ func TestParse(t *testing.T) {
 			"docker.",
 			"com.dokku.coredns-docker",
 			60 * time.Second,
+			nil,
 		},
 		{
 			`docker example.org`,
@@ -31,18 +33,21 @@ func TestParse(t *testing.T) {
 			"example.org.",
 			"com.dokku.coredns-docker",
 			60 * time.Second,
+			nil,
 		},
 		{
 			`docker example.org {
 				ttl 60
 				label_prefix com.example
 				max_backoff 30s
+				networks bridge my-custom-network
 			}`,
 			false,
 			60,
 			"example.org.",
 			"com.example",
 			30 * time.Second,
+			[]string{"bridge", "my-custom-network"},
 		},
 		{
 			`docker example.org {
@@ -53,6 +58,7 @@ func TestParse(t *testing.T) {
 			"example.org.",
 			"",
 			60 * time.Second,
+			nil,
 		},
 		{
 			`docker {
@@ -63,6 +69,7 @@ func TestParse(t *testing.T) {
 			"",
 			"",
 			0,
+			nil,
 		},
 		{
 			`docker {
@@ -73,6 +80,7 @@ func TestParse(t *testing.T) {
 			"",
 			"",
 			0,
+			nil,
 		},
 	}
 
@@ -112,6 +120,16 @@ func TestParse(t *testing.T) {
 
 		if d.maxBackoff != test.expectedBackoff {
 			t.Errorf("Test %d: expected backoff %v, got %v", i, test.expectedBackoff, d.maxBackoff)
+		}
+
+		if len(d.networks) != len(test.expectedNetworks) {
+			t.Errorf("Test %d: expected %d networks, got %d", i, len(test.expectedNetworks), len(d.networks))
+		} else {
+			for j := range d.networks {
+				if d.networks[j] != test.expectedNetworks[j] {
+					t.Errorf("Test %d: expected network %s at index %d, got %s", i, test.expectedNetworks[j], j, d.networks[j])
+				}
+			}
 		}
 	}
 }

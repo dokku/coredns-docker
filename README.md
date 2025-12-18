@@ -40,6 +40,7 @@ docker [DOMAIN] {
     ttl DURATION
     label_prefix PREFIX
     max_backoff DURATION
+    networks NETWORK...
 }
 ```
 
@@ -50,6 +51,8 @@ docker [DOMAIN] {
 - `label_prefix` allows you to set a custom prefix for SRV record labels. **PREFIX** defaults to `com.dokku.coredns-docker`.
 
 - `max_backoff` allows you to set a maximum backoff duration for the Docker event loop reconnection logic. **DURATION** defaults to `60s`.
+
+- `networks` allows you to specify a list of Docker networks to monitor. If specified, containers not on one of these networks will be ignored.
 
 ## Metrics
 
