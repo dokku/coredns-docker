@@ -201,11 +201,47 @@ func (d *Docker) syncRecords(ctx context.Context) {
 		return
 	}
 
+	newRecords, newSrvs := generateRecords(ctx, GenerateRecordsInput{
+		Containers:  containers,
+		Domain:      d.domain,
+		Inspector:   d.client,
+		LabelPrefix: d.labelPrefix,
+		Networks:    d.networks,
+	})
+
+	d.mu.Lock()
+	d.records = newRecords
+	d.srvs = newSrvs
+	d.mu.Unlock()
+	log.Debugf("Synced %d records and %d SRV records", len(newRecords), len(newSrvs))
+}
+
+// ContainerInspector is an interface for inspecting containers.
+type ContainerInspector interface {
+	ContainerInspect(ctx context.Context, containerID string) (container.InspectResponse, error)
+}
+
+// GenerateRecordsInput is the input for the generateRecords function.
+type GenerateRecordsInput struct {
+	// Client is the Docker client to use.
+	Inspector ContainerInspector
+	// Containers is the list of containers to generate records for.
+	Containers []container.Summary
+	// Domain is the domain to generate records for.
+	Domain string
+	// LabelPrefix is the label prefix to generate records for.
+	LabelPrefix string
+	// Networks is the list of networks to generate records for.
+	Networks []string
+}
+
+// generateRecords generates the records for the containers.
+func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[string][]net.IP, map[string][]srvRecord) {
 	newRecords := make(map[string][]net.IP)
 	newSrvs := make(map[string][]srvRecord)
 
-	for _, c := range containers {
-		inspect, err := d.client.ContainerInspect(ctx, c.ID)
+	for _, c := range input.Containers {
+		inspect, err := input.Inspector.ContainerInspect(ctx, c.ID)
 		if err != nil {
 			log.Errorf("Failed to inspect container %s: %v", c.ID, err)
 			continue
@@ -216,9 +252,9 @@ func (d *Docker) syncRecords(ctx context.Context) {
 			networkName = "bridge"
 		}
 
-		if len(d.networks) > 0 {
+		if len(input.Networks) > 0 {
 			found := false
-			for _, n := range d.networks {
+			for _, n := range input.Networks {
 				if n == networkName {
 					found = true
 					break
@@ -256,8 +292,8 @@ func (d *Docker) syncRecords(ctx context.Context) {
 		}
 
 		// Add SRV records based on labels
-		srvPrefix := d.labelPrefix + ".srv."
-		if d.labelPrefix == "" {
+		srvPrefix := input.LabelPrefix + "/srv."
+		if input.LabelPrefix == "" {
 			srvPrefix = "srv."
 		}
 
@@ -302,7 +338,7 @@ func (d *Docker) syncRecords(ctx context.Context) {
 			if name == "" {
 				continue
 			}
-			fqdn := strings.ToLower(name + "." + d.domain)
+			fqdn := strings.ToLower(name + "." + input.Domain)
 			if !strings.HasSuffix(fqdn, ".") {
 				fqdn += "."
 			}
@@ -318,9 +354,5 @@ func (d *Docker) syncRecords(ctx context.Context) {
 		}
 	}
 
-	d.mu.Lock()
-	d.records = newRecords
-	d.srvs = newSrvs
-	d.mu.Unlock()
-	log.Debugf("Synced %d records and %d SRV records", len(newRecords), len(newSrvs))
+	return newRecords, newSrvs
 }
