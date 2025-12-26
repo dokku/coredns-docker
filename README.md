@@ -191,3 +191,107 @@ host -t SRV _http._tcp.web.docker
 ```
 
 **Note:** The `~` prefix in `Domains=~docker.` tells systemd-resolved to route only queries for the `docker` domain to the specified DNS server, while other queries will use the default DNS servers.
+
+## Nginx Integration
+
+Nginx can be configured to use CoreDNS for resolving Docker container names, enabling dynamic reverse proxy configurations without hardcoding IP addresses.
+
+### Basic Configuration
+
+Configure nginx to use CoreDNS as a resolver by adding a `resolver` directive in your location blocks. Replace `127.0.0.1:1053` with the IP address and port where CoreDNS is listening.
+
+> [!Important]
+> Nginx resolves domain names only once at startup when using static hostnames in `proxy_pass`. To enable dynamic resolution that updates when containers restart, you must use variables.
+
+```nginx
+http {
+    server {
+        listen 80;
+        server_name example.com;
+        
+        location / {
+            resolver 127.0.0.1:1053 valid=10s;
+            set $backend "http://web.docker";
+            proxy_pass $backend;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+    }
+}
+```
+
+The `valid=10s` parameter controls how long nginx caches DNS responses. A shorter value ensures faster updates when containers restart. The variable (`$backend`) is required because nginx only performs DNS lookups for variables, not static hostnames.
+
+### Multiple Backend Services
+
+You can proxy to multiple Docker containers based on the request path:
+
+```nginx
+http {
+    server {
+        listen 80;
+        server_name example.com;
+        
+        location /api/ {
+            resolver 127.0.0.1:1053 valid=10s;
+            set $api_backend "http://api.docker";
+            proxy_pass $api_backend;
+            proxy_set_header Host $host;
+        }
+        
+        location /web/ {
+            resolver 127.0.0.1:1053 valid=10s;
+            set $web_backend "http://web.docker";
+            proxy_pass $web_backend;
+            proxy_set_header Host $host;
+        }
+    }
+}
+```
+
+### Using Docker Compose Project/Service Names
+
+If your containers use Docker Compose, you can reference them using the `project.service` format:
+
+```nginx
+http {
+    server {
+        listen 80;
+        server_name example.com;
+        
+        location / {
+            resolver 127.0.0.1:1053 valid=10s;
+            set $backend "http://myproject.myservice.docker";
+            proxy_pass $backend;
+            proxy_set_header Host $host;
+        }
+    }
+}
+```
+
+### Load Balancing Multiple Containers
+
+When multiple containers share the same name or alias, CoreDNS returns all IP addresses. Nginx will automatically load balance between them:
+
+```nginx
+http {
+    upstream backend {
+        resolver 127.0.0.1:1053 valid=10s;
+        server web.docker resolve;
+    }
+    
+    server {
+        listen 80;
+        server_name example.com;
+        
+        location / {
+            proxy_pass http://backend;
+            proxy_set_header Host $host;
+        }
+    }
+}
+```
+
+**Note:** The `resolve` parameter on the `server` directive is required to enable periodic re-resolution of the domain name. Without it, nginx will only resolve the domain once at startup.
+
+**Note:** Ensure that CoreDNS is accessible from the nginx container. If nginx runs in a Docker container, you may need to use the host's IP address (e.g., `host.docker.internal:1053` on Docker Desktop, or the host's bridge IP on Linux).
