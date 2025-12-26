@@ -12,9 +12,9 @@ import (
 
 func TestDocker(t *testing.T) {
 	d := &Docker{
-		Next:   test.ErrorHandler(),
-		ttl:    DefaultTTL,
-		domain: "docker.",
+		Next: test.ErrorHandler(),
+		ttl:  DefaultTTL,
+		zone: "docker.",
 		records: map[string][]net.IP{
 			"web.docker.":          {net.ParseIP("172.17.0.2")},
 			"db.docker.":           {net.ParseIP("172.17.0.3")},
@@ -138,7 +138,7 @@ func TestDockerEmptyPrefix(t *testing.T) {
 	d := &Docker{
 		Next:        test.ErrorHandler(),
 		ttl:         DefaultTTL,
-		domain:      "docker.",
+		zone:        "docker.",
 		labelPrefix: "",
 		srvs: map[string][]srvRecord{
 			"_http._tcp.web.docker.": {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coredns/caddy"
@@ -18,12 +19,12 @@ func init() { plugin.Register(pluginName, setup) }
 // setup is the function that gets called when the config parser see the token "docker".
 func setup(c *caddy.Controller) error {
 	d := &Docker{
-		ttl:         DefaultTTL,
-		records:     make(map[string][]net.IP),
-		srvs:        make(map[string][]srvRecord),
-		domain:      "docker.",
 		labelPrefix: "com.dokku.coredns-docker",
 		maxBackoff:  60 * time.Second,
+		records:     make(map[string][]net.IP),
+		srvs:        make(map[string][]srvRecord),
+		ttl:         DefaultTTL,
+		zone:        "docker.",
 	}
 	if err := parse(c, d); err != nil {
 		return plugin.Error(pluginName, err)
@@ -64,31 +65,10 @@ func setup(c *caddy.Controller) error {
 
 func parse(c *caddy.Controller, d *Docker) error {
 	for c.Next() {
-		// The first token is "docker", and the rest are domains
-		args := c.RemainingArgs()
-		if len(args) > 0 {
-			d.domain = args[0]
-			if d.domain[len(d.domain)-1] != '.' {
-				d.domain += "."
-			}
-		}
-
 		for c.NextBlock() {
 			selector := c.Val()
 
 			switch selector {
-			case "ttl":
-				if !c.NextArg() {
-					return c.ArgErr()
-				}
-				t, err := strconv.Atoi(c.Val())
-				if err != nil {
-					return c.Err("error parsing ttl: " + err.Error())
-				}
-				if t < 0 || t > 3600 {
-					return c.Errf("ttl must be in range [0, 3600]: %d", t)
-				}
-				d.ttl = uint32(t)
 			case "label_prefix":
 				if !c.NextArg() {
 					return c.ArgErr()
@@ -107,6 +87,28 @@ func parse(c *caddy.Controller, d *Docker) error {
 				d.networks = c.RemainingArgs()
 				if len(d.networks) == 0 {
 					return c.ArgErr()
+				}
+			case "ttl":
+				if !c.NextArg() {
+					return c.ArgErr()
+				}
+				t, err := strconv.Atoi(c.Val())
+				if err != nil {
+					return c.Err("error parsing ttl: " + err.Error())
+				}
+				if t < 0 || t > 3600 {
+					return c.Errf("ttl must be in range [0, 3600]: %d", t)
+				}
+				d.ttl = uint32(t)
+			case "zone":
+				if !c.NextArg() {
+					return c.ArgErr()
+				}
+
+				// trim periods from beginning and end of zone, then ensure it ends with a period
+				d.zone = strings.Trim(c.Val(), ".") + "."
+				if d.zone == "." {
+					return c.Err("zone cannot be empty")
 				}
 			default:
 				return c.Errf("unknown property '%s'", selector)

@@ -6,11 +6,12 @@ docker:1053 {
     debug
     health
     log
-    docker docker.localhost {
+    docker {
         ttl 10
         label_prefix com.dokku.coredns-docker
         max_backoff 30s
         networks bridge my-custom-network
+        zone  docker.localhost
     }
     prometheus :9153
     cache 30

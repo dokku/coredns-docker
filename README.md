@@ -52,7 +52,7 @@ This will create SRV records:
 
 If no labels with the specified prefix are found, the plugin falls back to using the container's exposed ports (`NetworkSettings.Ports`).
 
-- For a port mapping like `80/tcp`, it generates an SRV record for `_tcp._tcp.container-name.domain`.
+- For a port mapping like `80/tcp`, it generates an SRV record for `_tcp._tcp.container-name.zone`.
 - For a port mapping without a protocol like `80`, it generates SRV records for both `_tcp._tcp` and `_udp._udp`.
 
 ## Compilation
@@ -68,15 +68,16 @@ A binary will be created at `bin/coredns`.
 ## Syntax
 
 ```text
-docker [DOMAIN] {
-    ttl DURATION
+docker {
     label_prefix PREFIX
     max_backoff DURATION
     networks NETWORK...
+    ttl DURATION
+    zone ZONE
 }
 ```
 
-- `DOMAIN` is the domain for which the plugin will respond. Defaults to `docker.`.
+- `zone` is the domain for which the plugin will respond. Defaults to `docker.` and cannot be empty.
 
 - `ttl` allows you to set a custom TTL for responses. **DURATION** defaults to `30 seconds`. The minimum TTL allowed is `0` seconds, and the maximum is capped at `3600` seconds. Setting TTL to 0 will prevent records from being cached. The unit for the value is seconds.
 

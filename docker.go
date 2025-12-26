@@ -34,7 +34,7 @@ type Docker struct {
 
 	ttl         uint32
 	client      *client.Client
-	domain      string
+	zone        string
 	labelPrefix string
 	maxBackoff  time.Duration
 	networks    []string
@@ -56,7 +56,7 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	qname := strings.ToLower(state.Name())
 	qtype := state.QType()
 
-	if plugin.Zones([]string{d.domain}).Matches(qname) == "" {
+	if plugin.Zones([]string{d.zone}).Matches(qname) == "" {
 		return plugin.NextOrFailure(d.Name(), d.Next, ctx, w, r)
 	}
 
@@ -203,7 +203,7 @@ func (d *Docker) syncRecords(ctx context.Context) {
 
 	newRecords, newSrvs := generateRecords(ctx, GenerateRecordsInput{
 		Containers:  containers,
-		Domain:      d.domain,
+		Zone:        d.zone,
 		Inspector:   d.client,
 		LabelPrefix: d.labelPrefix,
 		Networks:    d.networks,
@@ -227,8 +227,8 @@ type GenerateRecordsInput struct {
 	Inspector ContainerInspector
 	// Containers is the list of containers to generate records for.
 	Containers []container.Summary
-	// Domain is the domain to generate records for.
-	Domain string
+	// Zone is the domain to generate records for.
+	Zone string
 	// LabelPrefix is the label prefix to generate records for.
 	LabelPrefix string
 	// Networks is the list of networks to generate records for.
@@ -338,7 +338,7 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 			if name == "" {
 				continue
 			}
-			fqdn := strings.ToLower(name + "." + input.Domain)
+			fqdn := strings.ToLower(name + "." + input.Zone)
 			if !strings.HasSuffix(fqdn, ".") {
 				fqdn += "."
 			}

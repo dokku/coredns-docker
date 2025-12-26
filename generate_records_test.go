@@ -58,7 +58,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Domain:      "docker.",
+				Zone:        "docker.",
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -100,7 +100,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Domain:      "docker.",
+				Zone:        "docker.",
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -146,7 +146,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Domain:      "docker.",
+				Zone:        "docker.",
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -190,7 +190,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Domain:      "docker.",
+				Zone:        "docker.",
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -241,7 +241,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Domain:      "docker.",
+				Zone:        "docker.",
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -292,7 +292,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Domain:      "docker.",
+				Zone:        "docker.",
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -359,7 +359,7 @@ func TestGenerateRecords(t *testing.T) {
 					{ID: "container1"},
 					{ID: "container2"},
 				},
-				Domain:      "docker.",
+				Zone:        "docker.",
 				LabelPrefix: "com.dokku.coredns-docker",
 				Networks:    []string{"bridge"},
 			},
@@ -403,7 +403,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Domain:      "docker.",
+				Zone:        "docker.",
 				LabelPrefix: "",
 			},
 			expected: struct {
