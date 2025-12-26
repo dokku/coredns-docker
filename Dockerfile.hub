@@ -1,0 +1,3 @@
+FROM scratch
+COPY ./build/linux/coredns-docker-amd64 /coredns-docker
+ENTRYPOINT ["/coredns-docker"]
