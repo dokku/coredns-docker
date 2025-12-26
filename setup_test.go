@@ -27,7 +27,9 @@ func TestParse(t *testing.T) {
 			nil,
 		},
 		{
-			`docker example.org`,
+			`docker {
+				domain example.org
+			}`,
 			false,
 			DefaultTTL,
 			"example.org.",
@@ -36,7 +38,8 @@ func TestParse(t *testing.T) {
 			nil,
 		},
 		{
-			`docker example.org {
+			`docker {
+				domain example.org
 				ttl 60
 				label_prefix com.example
 				max_backoff 30s
@@ -50,7 +53,8 @@ func TestParse(t *testing.T) {
 			[]string{"bridge", "my-custom-network"},
 		},
 		{
-			`docker example.org {
+			`docker {
+				domain example.org
 				label_prefix ""
 			}`,
 			false,
@@ -88,7 +92,7 @@ func TestParse(t *testing.T) {
 		c := caddy.NewTestController("dns", test.input)
 		d := &Docker{
 			ttl:         DefaultTTL,
-			domain:      "docker.",
+			zone:        "docker.",
 			labelPrefix: "com.dokku.coredns-docker",
 			maxBackoff:  60 * time.Second,
 		}
@@ -110,8 +114,8 @@ func TestParse(t *testing.T) {
 			t.Errorf("Test %d: expected TTL %d, got %d", i, test.expectedTTL, d.ttl)
 		}
 
-		if d.domain != test.expectedDomain {
-			t.Errorf("Test %d: expected domain %s, got %s", i, test.expectedDomain, d.domain)
+		if d.zone != test.expectedDomain {
+			t.Errorf("Test %d: expected domain %s, got %s", i, test.expectedDomain, d.zone)
 		}
 
 		if d.labelPrefix != test.expectedPrefix {
