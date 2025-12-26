@@ -2,7 +2,9 @@
 build:
 	mkdir -p bin
 	rm -rf .coredns-build
-	git clone --depth 1 https://github.com/coredns/coredns.git .coredns-build
+	git clone https://github.com/coredns/coredns.git .coredns-build
+	cd .coredns-build && git fetch --tags
+	cd .coredns-build && git checkout $$(git describe --tags --abbrev=0)
 	echo "docker:github.com/dokku/coredns-docker" >> .coredns-build/plugin.cfg
 	cd .coredns-build && go mod edit -replace github.com/dokku/coredns-docker=../../coredns-docker
 	cd .coredns-build && go mod download
