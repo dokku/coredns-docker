@@ -57,19 +57,13 @@ If no labels with the specified prefix are found, the plugin falls back to using
 
 ## Compilation
 
-It will require you to use `go get` or as a dependency on [plugin.cfg](https://github.com/coredns/coredns/blob/master/plugin.cfg).
-
-A simple way to consume this plugin, is by adding the following on [plugin.cfg](https://github.com/coredns/coredns/blob/master/plugin.cfg), and recompile it as [detailed on coredns.io](https://coredns.io/2017/07/25/compile-time-enabling-or-disabling-plugins/#build-with-compile-time-configuration-file).
-
-```text
-docker:github.com/dokku/coredns-docker
-```
-
-After this you can compile coredns by running:
+To build coredns with this plugin enabled, run the following command in this repository:
 
 ```bash
-make
+make build
 ```
+
+A binary will be created at `bin/coredns`.
 
 ## Syntax
 
