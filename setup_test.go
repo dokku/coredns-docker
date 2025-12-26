@@ -12,7 +12,7 @@ func TestParse(t *testing.T) {
 		input            string
 		shouldErr        bool
 		expectedTTL      uint32
-		expectedDomain   string
+		expectedZone     string
 		expectedPrefix   string
 		expectedBackoff  time.Duration
 		expectedNetworks []string
@@ -28,7 +28,7 @@ func TestParse(t *testing.T) {
 		},
 		{
 			`docker {
-				domain example.org
+				zone example.org
 			}`,
 			false,
 			DefaultTTL,
@@ -39,11 +39,11 @@ func TestParse(t *testing.T) {
 		},
 		{
 			`docker {
-				domain example.org
-				ttl 60
 				label_prefix com.example
 				max_backoff 30s
 				networks bridge my-custom-network
+				ttl 60
+				zone example.org
 			}`,
 			false,
 			60,
@@ -54,8 +54,8 @@ func TestParse(t *testing.T) {
 		},
 		{
 			`docker {
-				domain example.org
 				label_prefix ""
+				zone example.org
 			}`,
 			false,
 			DefaultTTL,
@@ -91,10 +91,10 @@ func TestParse(t *testing.T) {
 	for i, test := range tests {
 		c := caddy.NewTestController("dns", test.input)
 		d := &Docker{
-			ttl:         DefaultTTL,
-			zone:        "docker.",
 			labelPrefix: "com.dokku.coredns-docker",
 			maxBackoff:  60 * time.Second,
+			ttl:         DefaultTTL,
+			zone:        "docker.",
 		}
 		err := parse(c, d)
 
@@ -114,8 +114,8 @@ func TestParse(t *testing.T) {
 			t.Errorf("Test %d: expected TTL %d, got %d", i, test.expectedTTL, d.ttl)
 		}
 
-		if d.zone != test.expectedDomain {
-			t.Errorf("Test %d: expected domain %s, got %s", i, test.expectedDomain, d.zone)
+		if d.zone != test.expectedZone {
+			t.Errorf("Test %d: expected zone %s, got %s", i, test.expectedZone, d.zone)
 		}
 
 		if d.labelPrefix != test.expectedPrefix {
