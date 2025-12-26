@@ -161,3 +161,33 @@ _http._tcp.web.docker. 30 IN SRV 10 10 80 web.docker.
 ;; Query time: 0 msec
 ;; SERVER: 127.0.0.1#1053(127.0.0.1) (UDP)
 ```
+
+## Systemd Integration
+
+To configure systemd-resolved to use CoreDNS for the `docker` domain, create or edit `/etc/systemd/resolved.conf.d/docker.conf`:
+
+```ini
+[Resolve]
+DNS=127.0.0.1:1053
+Domains=~docker.
+```
+
+Replace `127.0.0.1:1053` with the IP address and port where CoreDNS is listening.
+
+Then restart systemd-resolved:
+
+```bash
+sudo systemctl restart systemd-resolved
+```
+
+After configuration, you can resolve Docker container names directly:
+
+```bash
+# Resolve container name
+host web.docker
+
+# Query SRV records
+host -t SRV _http._tcp.web.docker
+```
+
+**Note:** The `~` prefix in `Domains=~docker.` tells systemd-resolved to route only queries for the `docker` domain to the specified DNS server, while other queries will use the default DNS servers.
