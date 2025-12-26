@@ -12,6 +12,10 @@ build:
 	cp .coredns-build/coredns bin/coredns
 	# rm -rf .coredns-build
 
+.PHONY: test
+test:
+	go test -v ./...
+
 .PHONY: clean
 clean:
 	rm -rf bin
