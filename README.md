@@ -14,7 +14,7 @@ The plugin resolves container names, network aliases, DNS names, and SRV records
 
 To create SRV records using Docker labels, add labels to your container in the format:
 
-```
+```text
 [LABEL_PREFIX]/srv._[PROTOCOL]._[SERVICE]=[PORT]
 ```
 
