@@ -10,7 +10,7 @@ The docker plugin serves DNS records for containers running on the local Docker 
 
 The plugin resolves container names, network aliases, DNS names, and SRV records to their respective container IP addresses within a specified network.
 
-SRV records can be defined using container labels with the prefix `[LABEL_PREFIX].srv.`, followed by the protocol and service name. For example, with the default prefix, a label `com.dokku.coredns-docker.srv._tcp._http=80` will create an SRV record for `_http._tcp.container-name.domain` pointing to the container's IP on port 80.
+SRV records can be defined using container labels with the prefix `[LABEL_PREFIX]/srv.`, followed by the protocol and service name. For example, with the default prefix, a label `com.dokku.coredns-docker/srv._tcp._http=80` will create an SRV record for `_http._tcp.container-name.domain` pointing to the container's IP on port 80.
 
 If no labels with the specified prefix are found, the plugin falls back to using the container's exposed ports (`NetworkSettings.Ports`).
 
