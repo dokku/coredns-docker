@@ -192,6 +192,33 @@ host -t SRV _http._tcp.web.docker
 
 **Note:** The `~` prefix in `Domains=~docker.` tells systemd-resolved to route only queries for the `docker` domain to the specified DNS server, while other queries will use the default DNS servers.
 
+## macOS Integration
+
+To configure macOS to use CoreDNS for the `docker` domain, create a resolver configuration file:
+
+```bash
+sudo mkdir -p /etc/resolver
+sudo tee /etc/resolver/docker <<EOF
+nameserver 127.0.0.1
+port 1053
+EOF
+```
+
+Replace `127.0.0.1` and `1053` with the IP address and port where CoreDNS is listening.
+
+After creating the resolver file, macOS will automatically use CoreDNS for all queries to the `docker` domain without the need to restart your computer. You can test the configuration with the following commands:
+
+```bash
+# Resolve container name
+scutil --dns | grep docker
+
+# Query DNS directly
+dscacheutil -q host -a name web.docker
+
+# Or use dig
+dig web.docker @127.0.0.1 -p 1053
+```
+
 ## Nginx Integration
 
 Nginx can be configured to use CoreDNS for resolving Docker container names, enabling dynamic reverse proxy configurations without hardcoding IP addresses.
