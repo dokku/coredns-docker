@@ -1,18 +1,9 @@
 #!/usr/bin/env bats
 
 export SYSTEM_NAME="$(uname -s | tr '[:upper:]' '[:lower:]')"
-export BIN_NAME="build/$SYSTEM_NAME/coredns-docker-amd64"
-
-setup_file() {
-  make build
-}
-
-teardown_file() {
-  make clean
-}
 
 @test "[add] default" {
-  run true
+  run make test
   echo "output: $output"
   echo "status: $status"
   assert_success
