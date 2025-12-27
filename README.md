@@ -102,11 +102,13 @@ This plugin reports readiness to the ready plugin. It will be ready only when it
 
 ## Examples
 
-Enable docker with and resolve all containers with `.docker.` as the suffix.
+Enable docker with and resolve all containers with `.docker.localhost` as the suffix.
 
 ```text
 docker:1053 {
-    docker docker.
+    docker {
+        zone docker.localhost
+    }
     cache 30
 }
 ```
