@@ -1,0 +1,38 @@
+---
+name: CI
+
+# yamllint disable-line rule:truthy
+on:
+  pull_request:
+    branches:
+      - "*"
+  push:
+    branches:
+      - "main"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-24.04
+    env:
+      GITHUB_ACCESS_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
+      PACKAGECLOUD_TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: make version
+        run: |
+          make version .env.docker
+      - run: make ci-report
+      - run: make build-docker-image
+      - run: make build-in-docker
+      - run: make validate-in-docker
+      - name: upload packages
+        uses: actions/upload-artifact@v6
+        with:
+          name: build
+          path: build/**/*
