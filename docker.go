@@ -274,6 +274,7 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 
 		ip := net.ParseIP(network.IPAddress)
 		if ip == nil {
+			log.Debugf("Container %s has invalid IP address %s", c.ID, network.IPAddress)
 			continue
 		}
 
@@ -304,12 +305,19 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 			}
 			parts := strings.Split(strings.TrimPrefix(k, srvPrefix), ".")
 			if len(parts) != 2 {
+				log.Debugf("Container %s has invalid SRV label %s", c.ID, k)
 				continue
 			}
 			port, err := strconv.Atoi(v)
 			if err != nil {
+				log.Debugf("Container %s has invalid SRV port %s", c.ID, v)
 				continue
 			}
+			if port < 1 || port > 65535 {
+				log.Debugf("Container %s has SRV port %d not in valid range 1-65535", c.ID, port)
+				continue
+			}
+
 			// key: _service._proto
 			containerSrvs[strings.ToLower(parts[1]+"."+parts[0])] = uint16(port)
 		}
@@ -321,8 +329,14 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 				parts := strings.Split(portStr, "/")
 				port, err := strconv.Atoi(parts[0])
 				if err != nil {
+					log.Debugf("Container %s has invalid port %s", c.ID, portStr)
 					continue
 				}
+				if port < 1 || port > 65535 {
+					log.Debugf("Container %s has port %d not in valid range 1-65535", c.ID, port)
+					continue
+				}
+
 				if len(parts) > 1 {
 					// key: _proto._proto
 					proto := strings.ToLower(parts[1])
