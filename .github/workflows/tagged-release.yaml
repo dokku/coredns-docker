@@ -39,7 +39,7 @@ jobs:
       - run: make build
 
       - name: Setup Ruby
-        uses: ruby/setup-ruby@v1.275.0
+        uses: ruby/setup-ruby@v1.276.0
         with:
           bundler-cache: true
           working-directory: .github
