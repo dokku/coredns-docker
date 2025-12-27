@@ -36,13 +36,14 @@ jobs:
           echo "REPOSITORY_NAME=$(echo "${{ github.repository }}" | cut -d '/' -f 2)" >> $GITHUB_OUTPUT
           echo "GO_VERSION=$(go mod edit -json | jq -r .Go)" >> $GITHUB_OUTPUT
 
-      - run: make build
-
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1.276.0
         with:
           bundler-cache: true
           working-directory: .github
+
+      - name: Build
+        run: make build
 
       - name: Build Debian Packages
         run: |
