@@ -3,9 +3,10 @@ module github.com/dokku/coredns-docker
 go 1.24.0
 
 require (
-	github.com/coredns/caddy v1.1.1
+	github.com/coredns/caddy v1.1.3
 	github.com/coredns/coredns v1.10.0
 	github.com/docker/docker v28.5.2+incompatible
+	github.com/docker/go-connections v0.6.0
 	github.com/miekg/dns v1.1.50
 	github.com/prometheus/client_golang v1.14.0
 )
@@ -19,7 +20,6 @@ require (
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
-	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/flynn/go-shlex v0.0.0-20150515145356-3f9db97f8568 // indirect
