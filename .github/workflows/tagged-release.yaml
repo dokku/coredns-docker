@@ -36,20 +36,32 @@ jobs:
           echo "REPOSITORY_NAME=$(echo "${{ github.repository }}" | cut -d '/' -f 2)" >> $GITHUB_OUTPUT
           echo "GO_VERSION=$(go mod edit -json | jq -r .Go)" >> $GITHUB_OUTPUT
 
-      - name: Build binaries
-        uses: crazy-max/ghaction-xgo@v3
+      - run: make build
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1.275.0
         with:
-          xgo_version: latest
-          go_version: "${{ steps.repo-name.outputs.GO_VERSION }}"
-          dest: dist
-          prefix: ${{ steps.repo-name.outputs.REPOSITORY_NAME }}
-          targets: darwin/amd64,darwin/arm64,linux/arm64,linux/amd64,windows/amd64
-          v: true
-          x: false
-          race: false
-          ldflags: -s -w -X main.Version=${{ github.ref_name }}
-          buildmode: default
-          trimpath: true
+          bundler-cache: true
+          working-directory: .github
+
+      - name: Build Debian Packages
+        run: |
+          mkdir -p build/linux
+
+          # copy build/$PLATFORM/coredns-docker-$ARCH to dist/coredns-docker-$PLATFORM-$ARCH
+          for platform in darwin linux windows; do
+            for arch in amd64 arm64 arm mips mips64le ppc64le riscv64 s390x; do
+              if [ -f build/$platform/coredns-docker-$arch ]; then
+                cp build/$platform/coredns-docker-$arch dist/coredns-docker-$platform-$arch
+              fi
+            done
+          done
+
+          bundle exec make build/deb/${{ steps.repo-name.outputs.REPOSITORY_NAME }}_${{ github.ref_name }}_arm64.deb
+          bundle exec make build/deb/${{ steps.repo-name.outputs.REPOSITORY_NAME }}_${{ github.ref_name }}_amd64.deb
+          cp build/deb/*.deb dist/
+        env:
+          BUNDLE_GEMFILE: .github/Gemfile
 
       - name: Attest Build Provenance - darwin-amd64
         uses: actions/attest-build-provenance@v3.1.0
@@ -66,34 +78,45 @@ jobs:
         with:
           subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-amd64"
 
+      - name: Attest Build Provenance - linux-arm
+        uses: actions/attest-build-provenance@v3.1.0
+        with:
+          subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-arm"
+
       - name: Attest Build Provenance - linux-arm64
         uses: actions/attest-build-provenance@v3.1.0
         with:
           subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-arm64"
 
+      - name: Attest Build Provenance - linux-mips
+        uses: actions/attest-build-provenance@v3.1.0
+        with:
+          subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-mips"
+
+      - name: Attest Build Provenance - linux-mips64le
+        uses: actions/attest-build-provenance@v3.1.0
+        with:
+          subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-mips64le"
+
+      - name: Attest Build Provenance - linux-ppc64le
+        uses: actions/attest-build-provenance@v3.1.0
+        with:
+          subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-ppc64le"
+
+      - name: Attest Build Provenance - linux-riscv64
+        uses: actions/attest-build-provenance@v3.1.0
+        with:
+          subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-riscv64"
+
+      - name: Attest Build Provenance - linux-s390x
+        uses: actions/attest-build-provenance@v3.1.0
+        with:
+          subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-s390x"
+
       - name: Attest Build Provenance - windows-amd64
         uses: actions/attest-build-provenance@v3.1.0
         with:
           subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-windows-amd64.exe"
-
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1.275.0
-        with:
-          bundler-cache: true
-          working-directory: .github
-
-      - name: Build Debian Packages
-        run: |
-          mkdir -p build/linux
-
-          cp dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-amd64 build/linux/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-amd64
-          cp dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-arm64 build/linux/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-arm64
-
-          bundle exec make build/deb/${{ steps.repo-name.outputs.REPOSITORY_NAME }}_${{ github.ref_name }}_arm64.deb
-          bundle exec make build/deb/${{ steps.repo-name.outputs.REPOSITORY_NAME }}_${{ github.ref_name }}_amd64.deb
-          cp build/deb/*.deb dist/
-        env:
-          BUNDLE_GEMFILE: .github/Gemfile
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v6
