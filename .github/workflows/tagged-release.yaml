@@ -47,7 +47,7 @@ jobs:
 
       - name: Build Debian Packages
         run: |
-          mkdir -p build/linux
+          mkdir -p dist
 
           # copy build/$PLATFORM/coredns-docker-$ARCH to dist/coredns-docker-$PLATFORM-$ARCH
           for platform in darwin linux windows; do
