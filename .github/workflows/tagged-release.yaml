@@ -58,6 +58,8 @@ jobs:
             done
           done
 
+          cp build/windows/coredns-docker-amd64.exe dist/coredns-docker-windows-amd64.exe
+
           bundle exec make build/deb/${{ steps.repo-name.outputs.REPOSITORY_NAME }}_${{ github.ref_name }}_arm64.deb
           bundle exec make build/deb/${{ steps.repo-name.outputs.REPOSITORY_NAME }}_${{ github.ref_name }}_amd64.deb
           cp build/deb/*.deb dist/
