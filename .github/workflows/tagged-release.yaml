@@ -37,7 +37,7 @@ jobs:
           echo "GO_VERSION=$(go mod edit -json | jq -r .Go)" >> $GITHUB_OUTPUT
 
       - name: Setup Ruby
-        uses: ruby/setup-ruby@v1.276.0
+        uses: ruby/setup-ruby@v1.280.0
         with:
           bundler-cache: true
           working-directory: .github
