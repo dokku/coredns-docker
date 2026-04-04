@@ -37,7 +37,7 @@ jobs:
           echo "GO_VERSION=$(go mod edit -json | jq -r .Go)" >> $GITHUB_OUTPUT
 
       - name: Setup Ruby
-        uses: ruby/setup-ruby@v1.299.0
+        uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true
           working-directory: .github
@@ -67,59 +67,20 @@ jobs:
           BUNDLE_GEMFILE: .github/Gemfile
 
       - name: Attest Build Provenance - darwin-amd64
-        uses: actions/attest-build-provenance@v4.1.0
+        uses: actions/attest-build-provenance@v4
         with:
-          subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-darwin-amd64"
-
-      - name: Attest Build Provenance - darwin-arm64
-        uses: actions/attest-build-provenance@v4.1.0
-        with:
-          subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-darwin-arm64"
-
-      - name: Attest Build Provenance - linux-amd64
-        uses: actions/attest-build-provenance@v4.1.0
-        with:
-          subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-amd64"
-
-      - name: Attest Build Provenance - linux-arm
-        uses: actions/attest-build-provenance@v4.1.0
-        with:
-          subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-arm"
-
-      - name: Attest Build Provenance - linux-arm64
-        uses: actions/attest-build-provenance@v4.1.0
-        with:
-          subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-arm64"
-
-      - name: Attest Build Provenance - linux-mips
-        uses: actions/attest-build-provenance@v4.1.0
-        with:
-          subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-mips"
-
-      - name: Attest Build Provenance - linux-mips64le
-        uses: actions/attest-build-provenance@v4.1.0
-        with:
-          subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-mips64le"
-
-      - name: Attest Build Provenance - linux-ppc64le
-        uses: actions/attest-build-provenance@v4.1.0
-        with:
-          subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-ppc64le"
-
-      - name: Attest Build Provenance - linux-riscv64
-        uses: actions/attest-build-provenance@v4.1.0
-        with:
-          subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-riscv64"
-
-      - name: Attest Build Provenance - linux-s390x
-        uses: actions/attest-build-provenance@v4.1.0
-        with:
-          subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-s390x"
-
-      - name: Attest Build Provenance - windows-amd64
-        uses: actions/attest-build-provenance@v4.1.0
-        with:
-          subject-path: "dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-windows-amd64.exe"
+          subject-path: |
+            dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-darwin-amd64
+            dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-darwin-arm64
+            dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-amd64
+            dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-arm
+            dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-arm64
+            dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-mips
+            dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-mips64le
+            dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-ppc64le
+            dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-riscv64
+            dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-linux-s390x
+            dist/${{ steps.repo-name.outputs.REPOSITORY_NAME }}-windows-amd64.exe"
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
