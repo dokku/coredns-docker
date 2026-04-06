@@ -24,3 +24,6 @@ validation/*
 .env*
 
 .coredns-build/
+
+# Local test binary
+coredns-docker-local
