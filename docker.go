@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"net"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/miekg/dns"
 )
@@ -116,6 +118,7 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 		// NODATA
 		if err := w.WriteMsg(m); err != nil {
 			log.Errorf("Failed to write message: %v", err)
+			requestFailedCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
 		}
 		return dns.RcodeSuccess, nil
 	}
@@ -127,8 +130,10 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 
 	if err := w.WriteMsg(m); err != nil {
 		log.Errorf("Failed to write message: %v", err)
+		requestFailedCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
+	} else {
+		requestSuccessCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
 	}
-	requestSuccessCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
 	return dns.RcodeSuccess, nil
 }
 
@@ -247,50 +252,69 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 			continue
 		}
 
-		networkName := string(inspect.HostConfig.NetworkMode)
-		if networkName == "" || networkName == "default" {
-			networkName = "bridge"
+		// Guard against nil pointer fields in the inspect response
+		if inspect.ContainerJSONBase == nil || inspect.ContainerJSONBase.HostConfig == nil {
+			log.Debugf("Container %s has incomplete inspect response, skipping", c.ID)
+			continue
 		}
+		if inspect.NetworkSettings == nil || inspect.NetworkSettings.Networks == nil {
+			log.Debugf("Container %s has no network settings, skipping", c.ID)
+			continue
+		}
+		if inspect.Config == nil {
+			inspect.Config = &container.Config{Labels: map[string]string{}}
+		}
+
+		// Determine the primary network name from NetworkMode
+		primaryNetworkName := string(inspect.HostConfig.NetworkMode)
+		if primaryNetworkName == "" || primaryNetworkName == "default" {
+			primaryNetworkName = "bridge"
+		}
+
+		// Determine which networks to process
+		type networkEntry struct {
+			name     string
+			settings *network.EndpointSettings
+		}
+		var networksToProcess []networkEntry
 
 		if len(input.Networks) > 0 {
-			found := false
+			// Filter mode: check ALL attached networks against the allowed list
+			allowedSet := make(map[string]bool, len(input.Networks))
 			for _, n := range input.Networks {
-				if n == networkName {
-					found = true
-					break
+				allowedSet[n] = true
+			}
+			// Sort network names for deterministic output
+			netNames := make([]string, 0, len(inspect.NetworkSettings.Networks))
+			for netName := range inspect.NetworkSettings.Networks {
+				netNames = append(netNames, netName)
+			}
+			sort.Strings(netNames)
+			for _, netName := range netNames {
+				netSettings := inspect.NetworkSettings.Networks[netName]
+				if allowedSet[netName] && netSettings != nil {
+					networksToProcess = append(networksToProcess, networkEntry{name: netName, settings: netSettings})
 				}
 			}
-			if !found {
-				log.Debugf("Container %s not on any allowed network (on %s)", c.ID, networkName)
+			if len(networksToProcess) == 0 {
+				log.Debugf("Container %s not on any allowed network", c.ID)
 				continue
 			}
+		} else {
+			// No filter: use the primary network only
+			netSettings, ok := inspect.NetworkSettings.Networks[primaryNetworkName]
+			if !ok || netSettings == nil {
+				log.Debugf("Container %s not on network %s", c.ID, primaryNetworkName)
+				continue
+			}
+			networksToProcess = []networkEntry{{name: primaryNetworkName, settings: netSettings}}
 		}
 
-		network, ok := inspect.NetworkSettings.Networks[networkName]
-		if !ok {
-			log.Debugf("Container %s not on network %s", c.ID, networkName)
-			continue
-		}
+		// Compute per-container data once
+		baseName := strings.TrimPrefix(inspect.Name, "/")
 
-		ip := net.ParseIP(network.IPAddress)
-		if ip == nil {
-			log.Debugf("Container %s has invalid IP address %s", c.ID, network.IPAddress)
-			continue
-		}
-
-		// Collect all names
-		names := []string{
-			strings.TrimPrefix(inspect.Name, "/"),
-		}
-		names = append(names, network.Aliases...)
-		names = append(names, network.DNSNames...)
-
-		// Add Compose project/service alias if present
 		project := inspect.Config.Labels["com.docker.compose.project"]
 		service := inspect.Config.Labels["com.docker.compose.service"]
-		if project != "" && service != "" {
-			names = append(names, project+"."+service)
-		}
 
 		// Add SRV records based on labels
 		srvPrefix := input.LabelPrefix + "/srv."
@@ -348,22 +372,39 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 			}
 		}
 
-		for _, name := range names {
-			if name == "" {
+		// Generate records for each matching network
+		for _, ne := range networksToProcess {
+			ip := net.ParseIP(ne.settings.IPAddress)
+			if ip == nil {
+				log.Debugf("Container %s has invalid IP address %s on network %s", c.ID, ne.settings.IPAddress, ne.name)
 				continue
 			}
-			fqdn := strings.ToLower(name + "." + input.Zone)
-			if !strings.HasSuffix(fqdn, ".") {
-				fqdn += "."
-			}
-			newRecords[fqdn] = append(newRecords[fqdn], ip)
 
-			for srvKey, port := range containerSrvs {
-				srvName := srvKey + "." + fqdn
-				newSrvs[srvName] = append(newSrvs[srvName], srvRecord{
-					target: fqdn,
-					port:   port,
-				})
+			names := []string{baseName}
+			names = append(names, ne.settings.Aliases...)
+			names = append(names, ne.settings.DNSNames...)
+
+			if project != "" && service != "" {
+				names = append(names, project+"."+service)
+			}
+
+			for _, name := range names {
+				if name == "" {
+					continue
+				}
+				fqdn := strings.ToLower(name + "." + input.Zone)
+				if !strings.HasSuffix(fqdn, ".") {
+					fqdn += "."
+				}
+				newRecords[fqdn] = append(newRecords[fqdn], ip)
+
+				for srvKey, port := range containerSrvs {
+					srvName := srvKey + "." + fqdn
+					newSrvs[srvName] = append(newSrvs[srvName], srvRecord{
+						target: fqdn,
+						port:   port,
+					})
+				}
 			}
 		}
 	}
