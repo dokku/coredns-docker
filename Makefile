@@ -80,6 +80,8 @@ build:
 			fi; \
 		done; \
 	fi
+	@$(MAKE) build/deb/$(NAME)_$(VERSION)_amd64.deb
+	@$(MAKE) build/deb/$(NAME)_$(VERSION)_arm64.deb
 	# rm -rf .coredns-build
 
 build-docker-image:
