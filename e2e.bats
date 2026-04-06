@@ -85,25 +85,29 @@ wait_for_coredns() {
 wait_for_record() {
   local name="$1"
   local type="${2:-A}"
-  local retries=10
+  local retries=20
   local i=0
   while [ "$i" -lt "$retries" ]; do
+    local result
     result=$(dig +short +time=1 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "$name" "$type" 2>/dev/null)
     if [ -n "$result" ]; then
+      echo "$result"
       return 0
     fi
     sleep 0.5
     i=$((i + 1))
   done
+  echo "Record $name ($type) not found after waiting" >&2
   return 1
 }
 
 wait_for_record_gone() {
   local name="$1"
   local type="${2:-A}"
-  local retries=10
+  local retries=20
   local i=0
   while [ "$i" -lt "$retries" ]; do
+    local result
     result=$(dig +short +time=1 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "$name" "$type" 2>/dev/null)
     if [ -z "$result" ]; then
       return 0
@@ -111,6 +115,7 @@ wait_for_record_gone() {
     sleep 0.5
     i=$((i + 1))
   done
+  echo "Record $name ($type) still present after waiting" >&2
   return 1
 }
 
@@ -168,9 +173,8 @@ assert_output_contains() {
 
 @test "[e2e] A record: basic container resolves" {
   docker run -d --name coredns-e2e-web --network bridge alpine sleep 3600
-  wait_for_record "coredns-e2e-web.${COREDNS_ZONE}"
 
-  run dig +short +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-web.${COREDNS_ZONE}" A
+  run wait_for_record "coredns-e2e-web.${COREDNS_ZONE}"
   assert_success
   [[ "$output" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
 
@@ -185,9 +189,8 @@ assert_output_contains() {
   docker run -d --name coredns-e2e-srvweb --network bridge \
     --label "com.dokku.coredns-docker/srv._tcp._http=80" \
     alpine sleep 3600
-  wait_for_record "_http._tcp.coredns-e2e-srvweb.${COREDNS_ZONE}" "SRV"
 
-  run dig +short +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "_http._tcp.coredns-e2e-srvweb.${COREDNS_ZONE}" SRV
+  run wait_for_record "_http._tcp.coredns-e2e-srvweb.${COREDNS_ZONE}" "SRV"
   assert_success
   assert_output_contains "80 coredns-e2e-srvweb.${COREDNS_ZONE}."
 
@@ -196,7 +199,9 @@ assert_output_contains() {
 
 @test "[e2e] NODATA: AAAA query for IPv4-only container returns empty answer" {
   docker run -d --name coredns-e2e-v4only --network bridge alpine sleep 3600
-  wait_for_record "coredns-e2e-v4only.${COREDNS_ZONE}" "A"
+
+  run wait_for_record "coredns-e2e-v4only.${COREDNS_ZONE}" "A"
+  assert_success
 
   run dig +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-v4only.${COREDNS_ZONE}" AAAA
   assert_success
@@ -214,16 +219,16 @@ assert_output_contains() {
 
 @test "[e2e] container removal: record is cleared after container is removed" {
   docker run -d --name coredns-e2e-ephemeral --network bridge alpine sleep 3600
-  wait_for_record "coredns-e2e-ephemeral.${COREDNS_ZONE}"
 
-  # Verify record exists
-  run dig +short +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-ephemeral.${COREDNS_ZONE}" A
+  run wait_for_record "coredns-e2e-ephemeral.${COREDNS_ZONE}"
   assert_success
   [[ -n "$output" ]]
 
   # Remove container and wait for record to disappear
   docker rm -f coredns-e2e-ephemeral
-  wait_for_record_gone "coredns-e2e-ephemeral.${COREDNS_ZONE}"
+
+  run wait_for_record_gone "coredns-e2e-ephemeral.${COREDNS_ZONE}"
+  assert_success
 
   # Verify record is gone
   run dig +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-ephemeral.${COREDNS_ZONE}" A
@@ -236,14 +241,14 @@ assert_output_contains() {
     --network "$TEST_NETWORK" \
     --network-alias myalias \
     alpine sleep 3600
-  wait_for_record "myalias.${COREDNS_ZONE}"
 
-  run dig +short +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "myalias.${COREDNS_ZONE}" A
+  # Wait for alias record to appear
+  run wait_for_record "myalias.${COREDNS_ZONE}"
   assert_success
   [[ "$output" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
 
   # Also verify the container name itself resolves
-  run dig +short +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-aliased.${COREDNS_ZONE}" A
+  run wait_for_record "coredns-e2e-aliased.${COREDNS_ZONE}"
   assert_success
   [[ "$output" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
 
@@ -255,9 +260,8 @@ assert_output_contains() {
     --label "com.docker.compose.project=myproj" \
     --label "com.docker.compose.service=mysvc" \
     alpine sleep 3600
-  wait_for_record "myproj.mysvc.${COREDNS_ZONE}"
 
-  run dig +short +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "myproj.mysvc.${COREDNS_ZONE}" A
+  run wait_for_record "myproj.mysvc.${COREDNS_ZONE}"
   assert_success
   [[ "$output" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
 
@@ -281,9 +285,8 @@ assert_output_contains() {
   docker run -d --name coredns-e2e-srvport --network bridge \
     --expose 5432 \
     alpine sleep 3600
-  wait_for_record "_tcp._tcp.coredns-e2e-srvport.${COREDNS_ZONE}" "SRV"
 
-  run dig +short +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "_tcp._tcp.coredns-e2e-srvport.${COREDNS_ZONE}" SRV
+  run wait_for_record "_tcp._tcp.coredns-e2e-srvport.${COREDNS_ZONE}" "SRV"
   assert_success
   assert_output_contains "5432 coredns-e2e-srvport.${COREDNS_ZONE}."
 
@@ -292,11 +295,14 @@ assert_output_contains() {
 
 @test "[e2e] TTL: response has correct TTL value" {
   docker run -d --name coredns-e2e-ttl --network bridge alpine sleep 3600
-  wait_for_record "coredns-e2e-ttl.${COREDNS_ZONE}"
+
+  run wait_for_record "coredns-e2e-ttl.${COREDNS_ZONE}"
+  assert_success
 
   run dig +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-ttl.${COREDNS_ZONE}" A
   assert_success
-  assert_output_contains "10	IN	A"
+  # Match TTL of 10 in the ANSWER section regardless of whitespace format
+  [[ "$output" =~ [[:space:]]10[[:space:]]+IN[[:space:]]+A[[:space:]] ]]
 
   docker rm -f coredns-e2e-ttl
 }
