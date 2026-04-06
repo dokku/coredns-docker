@@ -50,6 +50,7 @@ jobs:
           path: |
             .coredns-build/
             !.coredns-build/.git/
+          include-hidden-files: true
           retention-days: 1
 
   build:
