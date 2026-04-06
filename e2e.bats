@@ -243,14 +243,16 @@ assert_output_contains() {
     alpine sleep 3600
 
   # Wait for alias record to appear
+  # On Docker 25+ user-defined networks, Aliases and DNSNames overlap
+  # causing duplicate IPs in dig output, so check first line only
   run wait_for_record "myalias.${COREDNS_ZONE}"
   assert_success
-  [[ "$output" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+  [[ "${output%%$'\n'*}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
 
   # Also verify the container name itself resolves
   run wait_for_record "coredns-e2e-aliased.${COREDNS_ZONE}"
   assert_success
-  [[ "$output" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+  [[ "${output%%$'\n'*}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
 
   docker rm -f coredns-e2e-aliased
 }
