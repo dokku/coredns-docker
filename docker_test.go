@@ -102,6 +102,20 @@ func TestDocker(t *testing.T) {
 			},
 		},
 		{
+			// NODATA: AAAA query for IPv4-only container returns empty answer
+			Qname:  "web.docker.",
+			Qtype:  dns.TypeAAAA,
+			Rcode:  dns.RcodeSuccess,
+			Answer: []dns.RR{},
+		},
+		{
+			// NODATA: A query for IPv6-only container returns empty answer
+			Qname:  "ipv6.docker.",
+			Qtype:  dns.TypeA,
+			Rcode:  dns.RcodeSuccess,
+			Answer: []dns.RR{},
+		},
+		{
 			Qname:  "nonexistent.docker.",
 			Qtype:  dns.TypeA,
 			Rcode:  dns.RcodeServerFailure, // Because Next is ErrorHandler

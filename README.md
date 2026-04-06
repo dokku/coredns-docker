@@ -159,6 +159,30 @@ _http._tcp.web.docker. 30 IN SRV 10 10 80 web.docker.
 ;; SERVER: 127.0.0.1#1053(127.0.0.1) (UDP)
 ```
 
+## Testing
+
+### Unit Tests
+
+Run the Go unit tests:
+
+```bash
+make test
+```
+
+### End-to-End Tests
+
+The e2e tests build a CoreDNS binary with the docker plugin, start it on port 15353, create Docker containers, and verify DNS resolution with `dig`.
+
+**Requirements:**
+
+- Docker daemon running
+- `dig` (from `dnsutils` / `bind-utils`)
+- `bats` ([bats-core](https://github.com/bats-core/bats-core))
+
+```bash
+make test-e2e
+```
+
 ## Integrating with other systems
 
 ### macOS Integration

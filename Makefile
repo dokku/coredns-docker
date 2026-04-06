@@ -143,9 +143,22 @@ build/deb/$(NAME)_$(VERSION)_arm64.deb: build/linux/$(NAME)-arm64
 		build/linux/$(NAME)-arm64=/usr/bin/$(NAME) \
 		LICENSE=/usr/share/doc/$(NAME)/copyright
 
+.PHONY: build-local
+build-local:
+	rm -rf .coredns-build
+	git clone https://github.com/coredns/coredns.git .coredns-build
+	cd .coredns-build && git fetch --tags
+	cd .coredns-build && git checkout $$(git describe --tags --abbrev=0)
+	echo "docker:github.com/dokku/coredns-docker" >> .coredns-build/plugin.cfg
+	cd .coredns-build && go mod edit -replace github.com/dokku/coredns-docker=../../coredns-docker
+	cd .coredns-build && go mod download
+	cd .coredns-build && go generate coredns.go
+	cd .coredns-build && go get
+	cd .coredns-build && CGO_ENABLED=0 go build -o ../coredns-docker-local -ldflags="-s -w"
+
 .PHONY: clean
 clean:
-	rm -rf build release validation .coredns-build
+	rm -rf build release validation .coredns-build coredns-docker-local
 
 ci-report:
 	docker version
@@ -207,3 +220,7 @@ prebuild:
 .PHONY: test
 test:
 	go test -v ./...
+
+.PHONY: test-e2e
+test-e2e: build-local
+	bats e2e.bats
