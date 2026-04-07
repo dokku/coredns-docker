@@ -1,0 +1,333 @@
+//go:build integration
+
+package docker
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/coredns/coredns/plugin/pkg/dnstest"
+	"github.com/coredns/coredns/plugin/test"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/client"
+	"github.com/miekg/dns"
+)
+
+const testContainerPrefix = "coredns-docker-test-"
+const testNetworkPrefix = "coredns-docker-test-net-"
+
+func TestMain(m *testing.M) {
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Skipping integration tests: cannot create Docker client: %v\n", err)
+		os.Exit(0)
+	}
+	defer cli.Close()
+
+	ctx := context.Background()
+	_, err = cli.Ping(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Skipping integration tests: Docker daemon not reachable: %v\n", err)
+		os.Exit(0)
+	}
+
+	// Clean up stale containers/networks from previous crashed runs
+	containers, _ := cli.ContainerList(ctx, container.ListOptions{All: true})
+	for _, c := range containers {
+		for _, name := range c.Names {
+			if strings.HasPrefix(strings.TrimPrefix(name, "/"), testContainerPrefix) {
+				_ = cli.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true})
+				break
+			}
+		}
+	}
+	networks, _ := cli.NetworkList(ctx, network.ListOptions{})
+	for _, n := range networks {
+		if strings.HasPrefix(n.Name, testNetworkPrefix) {
+			_ = cli.NetworkRemove(ctx, n.ID)
+		}
+	}
+
+	// Pull alpine:latest for test containers
+	reader, err := cli.ImagePull(ctx, "alpine:latest", image.PullOptions{})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to pull alpine:latest: %v\n", err)
+		os.Exit(1)
+	}
+	_, _ = io.Copy(io.Discard, reader)
+	reader.Close()
+
+	os.Exit(m.Run())
+}
+
+func setupIntegrationDocker(t *testing.T, networks []string) (*Docker, *client.Client) {
+	t.Helper()
+
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		t.Fatalf("Failed to create Docker client: %v", err)
+	}
+	t.Cleanup(func() { cli.Close() })
+
+	d := &Docker{
+		Next:        test.ErrorHandler(),
+		ttl:         DefaultTTL,
+		zone:        "docker.",
+		labelPrefix: "com.dokku.coredns-docker",
+		client:      cli,
+		networks:    networks,
+		records:     make(map[string][]net.IP),
+		srvs:        make(map[string][]srvRecord),
+	}
+
+	return d, cli
+}
+
+func createTestContainer(t *testing.T, cli *client.Client, name string, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig) string {
+	t.Helper()
+
+	ctx := context.Background()
+	resp, err := cli.ContainerCreate(ctx, config, hostConfig, networkingConfig, nil, name)
+	if err != nil {
+		t.Fatalf("Failed to create container %s: %v", name, err)
+	}
+
+	t.Cleanup(func() {
+		_ = cli.ContainerRemove(context.Background(), resp.ID, container.RemoveOptions{Force: true})
+	})
+
+	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		t.Fatalf("Failed to start container %s: %v", name, err)
+	}
+
+	return resp.ID
+}
+
+func testContainerName(t *testing.T, suffix string) string {
+	t.Helper()
+	name := testContainerPrefix + strings.ReplaceAll(t.Name(), "/", "-")
+	if suffix != "" {
+		name += "-" + suffix
+	}
+	return strings.ToLower(name)
+}
+
+func queryDNS(t *testing.T, d *Docker, qname string, qtype uint16) (*dns.Msg, int, error) {
+	t.Helper()
+
+	m := new(dns.Msg)
+	m.SetQuestion(qname, qtype)
+
+	w := dnstest.NewRecorder(&test.ResponseWriter{})
+	rcode, err := d.ServeDNS(context.Background(), w, m)
+	return w.Msg, rcode, err
+}
+
+func TestIntegrationBasicARecord(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	fqdn := name + ".docker."
+	resp, _, err := queryDNS(t, d, fqdn, dns.TypeA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", fqdn, err)
+	}
+	if resp == nil {
+		t.Fatalf("expected DNS response for %s, got nil", fqdn)
+	}
+	if len(resp.Answer) == 0 {
+		t.Fatalf("expected at least one A record for %s, got none", fqdn)
+	}
+
+	a, ok := resp.Answer[0].(*dns.A)
+	if !ok {
+		t.Fatalf("expected A record, got %T", resp.Answer[0])
+	}
+
+	ip := a.A
+	if ip == nil || ip.To4() == nil {
+		t.Fatalf("expected valid IPv4 address, got %v", ip)
+	}
+
+	privateRanges := []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
+	isPrivate := false
+	for _, cidr := range privateRanges {
+		_, ipNet, _ := net.ParseCIDR(cidr)
+		if ipNet.Contains(ip) {
+			isPrivate = true
+			break
+		}
+	}
+	if !isPrivate {
+		t.Errorf("expected private IP, got %s", ip)
+	}
+}
+
+func TestIntegrationSRVRecord(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		Labels: map[string]string{
+			"com.dokku.coredns-docker/srv._tcp._http": "80",
+		},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	srvQname := "_http._tcp." + name + ".docker."
+	resp, _, err := queryDNS(t, d, srvQname, dns.TypeSRV)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", srvQname, err)
+	}
+	if resp == nil {
+		t.Fatalf("expected DNS response for %s, got nil", srvQname)
+	}
+	if len(resp.Answer) == 0 {
+		t.Fatalf("expected at least one SRV record for %s, got none", srvQname)
+	}
+
+	srv, ok := resp.Answer[0].(*dns.SRV)
+	if !ok {
+		t.Fatalf("expected SRV record, got %T", resp.Answer[0])
+	}
+	if srv.Port != 80 {
+		t.Errorf("expected port 80, got %d", srv.Port)
+	}
+	expectedTarget := name + ".docker."
+	if srv.Target != expectedTarget {
+		t.Errorf("expected target %s, got %s", expectedTarget, srv.Target)
+	}
+}
+
+func TestIntegrationContainerRemoval(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	containerID := createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+	}, nil, nil)
+
+	// First sync: record should exist
+	d.syncRecords(ctx)
+
+	fqdn := name + ".docker."
+	resp, _, err := queryDNS(t, d, fqdn, dns.TypeA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", fqdn, err)
+	}
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected A record for %s after first sync", fqdn)
+	}
+
+	// Remove container
+	if err := cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true}); err != nil {
+		t.Fatalf("Failed to remove container: %v", err)
+	}
+
+	// Second sync: record should be gone
+	d.syncRecords(ctx)
+
+	resp, _, _ = queryDNS(t, d, fqdn, dns.TypeA)
+	if resp != nil && len(resp.Answer) > 0 {
+		t.Errorf("expected no A records for %s after removal, got %d", fqdn, len(resp.Answer))
+	}
+}
+
+func TestIntegrationNetworkAlias(t *testing.T) {
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		t.Fatalf("Failed to create Docker client: %v", err)
+	}
+	t.Cleanup(func() { cli.Close() })
+
+	ctx := context.Background()
+
+	// Create a custom network
+	networkName := testNetworkPrefix + "alias"
+	netResp, err := cli.NetworkCreate(ctx, networkName, network.CreateOptions{
+		Driver: "bridge",
+	})
+	if err != nil {
+		t.Fatalf("Failed to create network: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cli.NetworkRemove(context.Background(), netResp.ID)
+	})
+
+	d := &Docker{
+		Next:        test.ErrorHandler(),
+		ttl:         DefaultTTL,
+		zone:        "docker.",
+		labelPrefix: "com.dokku.coredns-docker",
+		client:      cli,
+		networks:    []string{networkName},
+		records:     make(map[string][]net.IP),
+		srvs:        make(map[string][]srvRecord),
+	}
+
+	alias := "myservicealias"
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+	}, &container.HostConfig{
+		NetworkMode: container.NetworkMode(networkName),
+	}, &network.NetworkingConfig{
+		EndpointsConfig: map[string]*network.EndpointSettings{
+			networkName: {
+				Aliases: []string{alias},
+			},
+		},
+	})
+
+	d.syncRecords(ctx)
+
+	// Verify alias resolves
+	aliasFqdn := alias + ".docker."
+	resp, _, err := queryDNS(t, d, aliasFqdn, dns.TypeA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", aliasFqdn, err)
+	}
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected A record for alias %s, got none", aliasFqdn)
+	}
+
+	a, ok := resp.Answer[0].(*dns.A)
+	if !ok {
+		t.Fatalf("expected A record, got %T", resp.Answer[0])
+	}
+	if a.A == nil || a.A.To4() == nil {
+		t.Fatalf("expected valid IPv4 for alias, got %v", a.A)
+	}
+
+	// Also verify the container name resolves
+	containerFqdn := name + ".docker."
+	resp, _, err = queryDNS(t, d, containerFqdn, dns.TypeA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", containerFqdn, err)
+	}
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected A record for container name %s, got none", containerFqdn)
+	}
+}

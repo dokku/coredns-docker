@@ -224,3 +224,7 @@ test:
 .PHONY: test-e2e
 test-e2e: build-local
 	bats e2e.bats
+
+.PHONY: test-integration
+test-integration:
+	go test -v -tags integration -count=1 -timeout 120s ./...
