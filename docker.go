@@ -78,6 +78,7 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 
 		if !ptrOk {
 			log.Debugf("No PTR records for %s, passing to next plugin", qname)
+			requestFallthroughCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
 			return plugin.NextOrFailure(d.Name(), d.Next, ctx, w, r)
 		}
 
@@ -120,6 +121,7 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	zone := plugin.Zones(d.zones).Matches(qname)
 	if zone == "" {
 		log.Debugf("Query %s not in zones [%s], passing to next plugin", qname, strings.Join(d.zones, ", "))
+		requestFallthroughCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
 		return plugin.NextOrFailure(d.Name(), d.Next, ctx, w, r)
 	}
 
@@ -186,6 +188,7 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	if !ok && !srvOk {
 		if d.Fall.Through(qname) {
 			log.Debugf("No records found for %s, falling through to next plugin", qname)
+			requestFallthroughCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
 			return plugin.NextOrFailure(d.Name(), d.Next, ctx, w, r)
 		}
 
@@ -198,6 +201,8 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 		if err := w.WriteMsg(m); err != nil {
 			log.Errorf("Failed to write message: %v", err)
 			requestFailedCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
+		} else {
+			requestSuccessCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
 		}
 		return dns.RcodeSuccess, nil
 	}
@@ -259,6 +264,8 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 		if err := w.WriteMsg(m); err != nil {
 			log.Errorf("Failed to write message: %v", err)
 			requestFailedCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
+		} else {
+			requestSuccessCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
 		}
 		return dns.RcodeSuccess, nil
 	}
@@ -266,6 +273,7 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	if !found {
 		if d.Fall.Through(qname) {
 			log.Debugf("No handler for type %s on %s, falling through to next plugin", dns.TypeToString[qtype], qname)
+			requestFallthroughCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
 			return plugin.NextOrFailure(d.Name(), d.Next, ctx, w, r)
 		}
 
@@ -275,6 +283,8 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 		if err := w.WriteMsg(m); err != nil {
 			log.Errorf("Failed to write message: %v", err)
 			requestFailedCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
+		} else {
+			requestSuccessCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
 		}
 		return dns.RcodeSuccess, nil
 	}

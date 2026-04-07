@@ -970,6 +970,218 @@ func TestServeDNSStaleRequestMetric(t *testing.T) {
 	}
 }
 
+func TestServeDNSNXDOMAINSuccessMetric(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker."},
+		records:   map[string][]net.IP{},
+		srvs:      map[string][]srvRecord{},
+		ptrs:      map[string][]string{},
+	}
+
+	beforeSuccess := testutil.ToFloat64(requestSuccessCount.WithLabelValues(""))
+	beforeFailed := testutil.ToFloat64(requestFailedCount.WithLabelValues(""))
+
+	m := new(dns.Msg)
+	m.SetQuestion("nonexistent.docker.", dns.TypeA)
+	w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+	_, err := d.ServeDNS(context.Background(), w, m)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	afterSuccess := testutil.ToFloat64(requestSuccessCount.WithLabelValues(""))
+	afterFailed := testutil.ToFloat64(requestFailedCount.WithLabelValues(""))
+	if afterSuccess != beforeSuccess+1 {
+		t.Errorf("expected success_requests_total to increment by 1, before=%f after=%f", beforeSuccess, afterSuccess)
+	}
+	if afterFailed != beforeFailed {
+		t.Errorf("expected failed_requests_total to not change, before=%f after=%f", beforeFailed, afterFailed)
+	}
+}
+
+func TestServeDNSNODATATypeMismatchSuccessMetric(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker."},
+		records: map[string][]net.IP{
+			"web.docker.": {net.ParseIP("172.17.0.2")},
+		},
+		srvs: map[string][]srvRecord{},
+		ptrs: map[string][]string{},
+	}
+
+	beforeSuccess := testutil.ToFloat64(requestSuccessCount.WithLabelValues(""))
+	beforeFailed := testutil.ToFloat64(requestFailedCount.WithLabelValues(""))
+
+	m := new(dns.Msg)
+	m.SetQuestion("web.docker.", dns.TypeAAAA)
+	w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+	_, err := d.ServeDNS(context.Background(), w, m)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	afterSuccess := testutil.ToFloat64(requestSuccessCount.WithLabelValues(""))
+	afterFailed := testutil.ToFloat64(requestFailedCount.WithLabelValues(""))
+	if afterSuccess != beforeSuccess+1 {
+		t.Errorf("expected success_requests_total to increment by 1, before=%f after=%f", beforeSuccess, afterSuccess)
+	}
+	if afterFailed != beforeFailed {
+		t.Errorf("expected failed_requests_total to not change, before=%f after=%f", beforeFailed, afterFailed)
+	}
+}
+
+func TestServeDNSNODATAUnsupportedTypeSuccessMetric(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker."},
+		records: map[string][]net.IP{
+			"web.docker.": {net.ParseIP("172.17.0.2")},
+		},
+		srvs: map[string][]srvRecord{},
+		ptrs: map[string][]string{},
+	}
+
+	beforeSuccess := testutil.ToFloat64(requestSuccessCount.WithLabelValues(""))
+	beforeFailed := testutil.ToFloat64(requestFailedCount.WithLabelValues(""))
+
+	m := new(dns.Msg)
+	m.SetQuestion("web.docker.", dns.TypeMX)
+	w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+	_, err := d.ServeDNS(context.Background(), w, m)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	afterSuccess := testutil.ToFloat64(requestSuccessCount.WithLabelValues(""))
+	afterFailed := testutil.ToFloat64(requestFailedCount.WithLabelValues(""))
+	if afterSuccess != beforeSuccess+1 {
+		t.Errorf("expected success_requests_total to increment by 1, before=%f after=%f", beforeSuccess, afterSuccess)
+	}
+	if afterFailed != beforeFailed {
+		t.Errorf("expected failed_requests_total to not change, before=%f after=%f", beforeFailed, afterFailed)
+	}
+}
+
+func TestServeDNSFallthroughNXDOMAINMetric(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker."},
+		Fall:      fall.Root,
+		records:   map[string][]net.IP{},
+		srvs:      map[string][]srvRecord{},
+		ptrs:      map[string][]string{},
+	}
+
+	beforeFallthrough := testutil.ToFloat64(requestFallthroughCount.WithLabelValues(""))
+	beforeSuccess := testutil.ToFloat64(requestSuccessCount.WithLabelValues(""))
+
+	m := new(dns.Msg)
+	m.SetQuestion("nonexistent.docker.", dns.TypeA)
+	w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+	d.ServeDNS(context.Background(), w, m)
+
+	afterFallthrough := testutil.ToFloat64(requestFallthroughCount.WithLabelValues(""))
+	afterSuccess := testutil.ToFloat64(requestSuccessCount.WithLabelValues(""))
+	if afterFallthrough != beforeFallthrough+1 {
+		t.Errorf("expected fallthrough_requests_total to increment by 1, before=%f after=%f", beforeFallthrough, afterFallthrough)
+	}
+	if afterSuccess != beforeSuccess {
+		t.Errorf("expected success_requests_total to not change on fallthrough, before=%f after=%f", beforeSuccess, afterSuccess)
+	}
+}
+
+func TestServeDNSFallthroughUnsupportedTypeMetric(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker."},
+		Fall:      fall.Root,
+		records: map[string][]net.IP{
+			"web.docker.": {net.ParseIP("172.17.0.2")},
+		},
+		srvs: map[string][]srvRecord{},
+		ptrs: map[string][]string{},
+	}
+
+	beforeFallthrough := testutil.ToFloat64(requestFallthroughCount.WithLabelValues(""))
+
+	m := new(dns.Msg)
+	m.SetQuestion("web.docker.", dns.TypeMX)
+	w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+	d.ServeDNS(context.Background(), w, m)
+
+	afterFallthrough := testutil.ToFloat64(requestFallthroughCount.WithLabelValues(""))
+	if afterFallthrough != beforeFallthrough+1 {
+		t.Errorf("expected fallthrough_requests_total to increment by 1, before=%f after=%f", beforeFallthrough, afterFallthrough)
+	}
+}
+
+func TestServeDNSFallthroughZoneMissMetric(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker."},
+		records:   map[string][]net.IP{},
+		srvs:      map[string][]srvRecord{},
+		ptrs:      map[string][]string{},
+	}
+
+	beforeFallthrough := testutil.ToFloat64(requestFallthroughCount.WithLabelValues(""))
+
+	m := new(dns.Msg)
+	m.SetQuestion("web.other.", dns.TypeA)
+	w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+	d.ServeDNS(context.Background(), w, m)
+
+	afterFallthrough := testutil.ToFloat64(requestFallthroughCount.WithLabelValues(""))
+	if afterFallthrough != beforeFallthrough+1 {
+		t.Errorf("expected fallthrough_requests_total to increment by 1, before=%f after=%f", beforeFallthrough, afterFallthrough)
+	}
+}
+
+func TestServeDNSFallthroughPTRNotFoundMetric(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker."},
+		records:   map[string][]net.IP{},
+		srvs:      map[string][]srvRecord{},
+		ptrs:      map[string][]string{},
+	}
+
+	beforeFallthrough := testutil.ToFloat64(requestFallthroughCount.WithLabelValues(""))
+
+	m := new(dns.Msg)
+	m.SetQuestion("9.9.9.9.in-addr.arpa.", dns.TypePTR)
+	w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+	d.ServeDNS(context.Background(), w, m)
+
+	afterFallthrough := testutil.ToFloat64(requestFallthroughCount.WithLabelValues(""))
+	if afterFallthrough != beforeFallthrough+1 {
+		t.Errorf("expected fallthrough_requests_total to increment by 1, before=%f after=%f", beforeFallthrough, afterFallthrough)
+	}
+}
+
 func enableDebugLog(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer

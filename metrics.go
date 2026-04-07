@@ -44,6 +44,13 @@ var (
 		Name:      "stale_requests_total",
 		Help:      "Counter of DNS requests served from stale data during Docker daemon disconnect.",
 	}, []string{"server"})
+	// requestFallthroughCount is the number of DNS requests passed to the next plugin via fallthrough.
+	requestFallthroughCount = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: plugin.Namespace,
+		Subsystem: pluginName,
+		Name:      "fallthrough_requests_total",
+		Help:      "Counter of DNS requests passed to the next plugin via fallthrough.",
+	}, []string{"server"})
 	// recordsCount is the number of A/AAAA DNS record names currently tracked.
 	recordsCount = promauto.NewGauge(prometheus.GaugeOpts{
 		Namespace: plugin.Namespace,
