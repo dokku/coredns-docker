@@ -169,6 +169,18 @@ Run the Go unit tests:
 make test
 ```
 
+### Integration Tests
+
+The integration tests exercise the plugin against a real Docker daemon. They create containers, call `syncRecords`, and verify DNS resolution through `ServeDNS`.
+
+**Requirements:**
+
+- Docker daemon running
+
+```bash
+make test-integration
+```
+
 ### End-to-End Tests
 
 The e2e tests build a CoreDNS binary with the docker plugin, start it on port 15353, create Docker containers, and verify DNS resolution with `dig`.
