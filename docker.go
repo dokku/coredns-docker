@@ -44,10 +44,11 @@ type Docker struct {
 	maxBackoff  time.Duration
 	networks    []string
 
-	mu        sync.RWMutex
-	records   map[string][]net.IP
-	srvs      map[string][]srvRecord
-	connected bool
+	mu           sync.RWMutex
+	records      map[string][]net.IP
+	srvs         map[string][]srvRecord
+	connected    bool
+	lastSyncTime time.Time
 }
 
 type srvRecord struct {
@@ -68,6 +69,7 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	d.mu.RLock()
 	ips, ok := d.records[qname]
 	srvs, srvOk := d.srvs[qname]
+	isConnected := d.connected
 	d.mu.RUnlock()
 
 	if !ok && !srvOk {
@@ -92,11 +94,16 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	m.Compress = true
 	m.Rcode = dns.RcodeSuccess
 
+	ttl := d.ttl
+	if !isConnected && ttl > 5 {
+		ttl = 5
+	}
+
 	header := dns.RR_Header{
 		Name:   state.QName(),
 		Rrtype: qtype,
 		Class:  dns.ClassINET,
-		Ttl:    d.ttl,
+		Ttl:    ttl,
 	}
 
 	found := false
@@ -240,7 +247,9 @@ func (d *Docker) syncRecords(ctx context.Context) {
 	d.mu.Lock()
 	d.records = newRecords
 	d.srvs = newSrvs
+	d.lastSyncTime = time.Now()
 	d.mu.Unlock()
+	lastSyncTimestamp.Set(float64(time.Now().Unix()))
 	log.Debugf("Synced %d records and %d SRV records", len(newRecords), len(newSrvs))
 }
 

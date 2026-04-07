@@ -92,16 +92,30 @@ docker {
 
 ## Metrics
 
-If monitoring is enabled (via the *prometheus* directive) the following metric is exported:
+If monitoring is enabled (via the *prometheus* directive) the following metrics are exported:
 
 - `coredns_docker_success_requests_total{server}` - Counter of DNS requests handled successfully.
 - `coredns_docker_failed_requests_total{server}` - Counter of DNS requests failed.
+- `coredns_docker_last_sync_timestamp_seconds` - Unix timestamp of the last successful record sync from Docker. This can be used to monitor how fresh the plugin's data is.
 
 The `server` label indicated which server handled the request.
 
 ## Ready
 
-This plugin reports readiness to the ready plugin. It will be ready only when it has successfully connected to the Docker daemon.
+This plugin reports readiness to the ready plugin. It will be ready when it has successfully connected to the Docker daemon, or when it has previously synced records (stale mode). During Docker daemon downtime, the plugin continues serving the last known records with a reduced TTL of 5 seconds to encourage clients to re-query frequently.
+
+## Stale Records
+
+When the Docker daemon becomes unreachable, the plugin continues serving the last known DNS records rather than failing all queries. This ensures that existing container names remain resolvable during brief Docker daemon restarts or outages.
+
+During stale mode:
+
+- All previously synced A, AAAA, and SRV records continue to be served.
+- The TTL on stale responses is reduced to 5 seconds (or the configured TTL if it is already 5 seconds or lower). This encourages DNS clients to re-query frequently, so they pick up fresh records as soon as the daemon reconnects.
+- The `coredns_docker_last_sync_timestamp_seconds` metric can be used to monitor how long the plugin has been operating on stale data.
+- The plugin remains "ready" as long as it has previously synced at least once, even if the daemon is currently disconnected.
+
+Once the Docker daemon becomes reachable again, the plugin automatically reconnects (using exponential backoff), re-syncs all container records, and resumes normal TTL values.
 
 ## Examples
 

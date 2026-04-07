@@ -434,3 +434,72 @@ func TestIntegrationMultiZone(t *testing.T) {
 		t.Errorf("expected same IP for both zones, got %s and %s", a1.A, a2.A)
 	}
 }
+
+func TestIntegrationReadyConnected(t *testing.T) {
+	d, _ := setupIntegrationDocker(t, nil)
+
+	d.mu.Lock()
+	d.connected = true
+	d.mu.Unlock()
+
+	d.syncRecords(context.Background())
+
+	if !d.Ready() {
+		t.Error("expected Ready() to return true when connected with synced records")
+	}
+}
+
+func TestIntegrationReadyDisconnectedWithRecords(t *testing.T) {
+	d, _ := setupIntegrationDocker(t, nil)
+
+	d.syncRecords(context.Background())
+
+	d.mu.Lock()
+	d.connected = false
+	d.mu.Unlock()
+
+	if !d.Ready() {
+		t.Error("expected Ready() to return true when disconnected but has synced records")
+	}
+}
+
+func TestIntegrationReadyDisconnectedNoSync(t *testing.T) {
+	d, _ := setupIntegrationDocker(t, nil)
+
+	d.mu.Lock()
+	d.connected = false
+	d.mu.Unlock()
+
+	if d.Ready() {
+		t.Error("expected Ready() to return false when disconnected and never synced")
+	}
+}
+
+func TestIntegrationReadyNoClient(t *testing.T) {
+	d := &Docker{
+		records: make(map[string][]net.IP),
+		srvs:    make(map[string][]srvRecord),
+	}
+
+	if d.Ready() {
+		t.Error("expected Ready() to return false when client is nil")
+	}
+}
+
+func TestIntegrationLastSyncTimeSet(t *testing.T) {
+	d, _ := setupIntegrationDocker(t, nil)
+
+	if !d.lastSyncTime.IsZero() {
+		t.Error("expected lastSyncTime to be zero before sync")
+	}
+
+	d.syncRecords(context.Background())
+
+	d.mu.RLock()
+	syncTime := d.lastSyncTime
+	d.mu.RUnlock()
+
+	if syncTime.IsZero() {
+		t.Error("expected lastSyncTime to be set after sync")
+	}
+}

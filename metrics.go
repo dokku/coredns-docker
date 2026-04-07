@@ -22,4 +22,11 @@ var (
 		Name:      "failed_requests_total",
 		Help:      "Counter of DNS requests failed.",
 	}, []string{"server"})
+	// lastSyncTimestamp is the Unix timestamp of the last successful record sync from Docker.
+	lastSyncTimestamp = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: plugin.Namespace,
+		Subsystem: pluginName,
+		Name:      "last_sync_timestamp_seconds",
+		Help:      "Unix timestamp of the last successful record sync from Docker.",
+	})
 )
