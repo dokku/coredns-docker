@@ -246,6 +246,14 @@ assert_output_contains() {
   assert_output_contains "hostmaster.${COREDNS_ZONE}."
 }
 
+@test "[e2e] NS record: zone apex returns NS" {
+  run dig +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "${COREDNS_ZONE}" NS
+  assert_success
+  assert_output_contains "status: NOERROR"
+  assert_output_contains "ANSWER: 1"
+  assert_output_contains "ns.dns.${COREDNS_ZONE}."
+}
+
 @test "[e2e] NXDOMAIN: response includes SOA in authority section" {
   run dig +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-soa-nonexistent.${COREDNS_ZONE}" A
   assert_success
