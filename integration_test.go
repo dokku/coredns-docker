@@ -80,7 +80,7 @@ func setupIntegrationDocker(t *testing.T, networks []string) (*Docker, *client.C
 	d := &Docker{
 		Next:        test.ErrorHandler(),
 		ttl:         DefaultTTL,
-		zone:        "docker.",
+		zones:       []string{"docker."},
 		labelPrefix: "com.dokku.coredns-docker",
 		client:      cli,
 		networks:    networks,
@@ -279,7 +279,7 @@ func TestIntegrationNetworkAlias(t *testing.T) {
 	d := &Docker{
 		Next:        test.ErrorHandler(),
 		ttl:         DefaultTTL,
-		zone:        "docker.",
+		zones:       []string{"docker."},
 		labelPrefix: "com.dokku.coredns-docker",
 		client:      cli,
 		networks:    []string{networkName},
@@ -376,5 +376,61 @@ func TestIntegrationNoFallthrough(t *testing.T) {
 	}
 	if resp.Rcode != dns.RcodeNameError {
 		t.Errorf("expected NXDOMAIN for nonexistent without fallthrough, got rcode %d", resp.Rcode)
+	}
+}
+
+func TestIntegrationMultiZone(t *testing.T) {
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		t.Fatalf("Failed to create Docker client: %v", err)
+	}
+	t.Cleanup(func() { cli.Close() })
+
+	d := &Docker{
+		Next:        test.ErrorHandler(),
+		ttl:         DefaultTTL,
+		zones:       []string{"docker.", "internal."},
+		labelPrefix: "com.dokku.coredns-docker",
+		client:      cli,
+		records:     make(map[string][]net.IP),
+		srvs:        make(map[string][]srvRecord),
+	}
+
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	// Verify container resolves under first zone
+	fqdn1 := name + ".docker."
+	resp, _, err := queryDNS(t, d, fqdn1, dns.TypeA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", fqdn1, err)
+	}
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected A record for %s, got none", fqdn1)
+	}
+
+	// Verify container resolves under second zone
+	fqdn2 := name + ".internal."
+	resp, _, err = queryDNS(t, d, fqdn2, dns.TypeA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", fqdn2, err)
+	}
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected A record for %s, got none", fqdn2)
+	}
+
+	// Both should resolve to the same IP
+	a1 := resp.Answer[0].(*dns.A)
+	resp1, _, _ := queryDNS(t, d, fqdn1, dns.TypeA)
+	a2 := resp1.Answer[0].(*dns.A)
+	if !a1.A.Equal(a2.A) {
+		t.Errorf("expected same IP for both zones, got %s and %s", a1.A, a2.A)
 	}
 }
