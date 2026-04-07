@@ -4,5 +4,11 @@ package docker
 func (d *Docker) Ready() bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	return d.client != nil && d.connected
+	if d.client == nil {
+		return false
+	}
+	if d.connected {
+		return true
+	}
+	return !d.lastSyncTime.IsZero()
 }

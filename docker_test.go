@@ -13,9 +13,10 @@ import (
 
 func TestDocker(t *testing.T) {
 	d := &Docker{
-		Next: test.ErrorHandler(),
-		ttl:  DefaultTTL,
-		zones: []string{"docker."},
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker."},
 		records: map[string][]net.IP{
 			"web.docker.":          {net.ParseIP("172.17.0.2")},
 			"db.docker.":           {net.ParseIP("172.17.0.3")},
@@ -153,6 +154,7 @@ func TestDockerEmptyPrefix(t *testing.T) {
 	d := &Docker{
 		Next:        test.ErrorHandler(),
 		ttl:         DefaultTTL,
+		connected:   true,
 		zones:       []string{"docker."},
 		labelPrefix: "",
 		srvs: map[string][]srvRecord{
@@ -186,10 +188,11 @@ func TestDockerEmptyPrefix(t *testing.T) {
 
 func TestDockerFallthrough(t *testing.T) {
 	d := &Docker{
-		Next: test.ErrorHandler(),
-		ttl:  DefaultTTL,
-		zones: []string{"docker."},
-		Fall: fall.Root,
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker."},
+		Fall:      fall.Root,
 		records: map[string][]net.IP{
 			"web.docker.": {net.ParseIP("172.17.0.2")},
 		},
@@ -242,10 +245,11 @@ func TestDockerFallthrough(t *testing.T) {
 
 func TestDockerFallthroughZoneSpecific(t *testing.T) {
 	d := &Docker{
-		Next: test.ErrorHandler(),
-		ttl:  DefaultTTL,
-		zones: []string{"docker."},
-		Fall: fall.F{Zones: []string{"other."}},
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker."},
+		Fall:      fall.F{Zones: []string{"other."}},
 		records: map[string][]net.IP{
 			"web.docker.": {net.ParseIP("172.17.0.2")},
 		},
@@ -276,9 +280,10 @@ func TestDockerFallthroughZoneSpecific(t *testing.T) {
 
 func TestDockerMultiZone(t *testing.T) {
 	d := &Docker{
-		Next:  test.ErrorHandler(),
-		ttl:   DefaultTTL,
-		zones: []string{"docker.", "internal."},
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker.", "internal."},
 		records: map[string][]net.IP{
 			"web.docker.":   {net.ParseIP("172.17.0.2")},
 			"web.internal.": {net.ParseIP("172.17.0.2")},
@@ -357,5 +362,126 @@ func TestDockerMultiZone(t *testing.T) {
 		if err := test.SortAndCheck(w.Msg, tc); err != nil {
 			t.Errorf("Test %d: %v", i, err)
 		}
+	}
+}
+
+func TestDockerStaleTTL(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: false,
+		zones:     []string{"docker."},
+		records: map[string][]net.IP{
+			"web.docker.": {net.ParseIP("172.17.0.2")},
+		},
+		srvs: map[string][]srvRecord{
+			"_http._tcp.web.docker.": {
+				{target: "web.docker.", port: 80},
+			},
+		},
+	}
+
+	var cases = []test.Case{
+		{
+			Qname: "web.docker.",
+			Qtype: dns.TypeA,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.A("web.docker.	5	IN	A	172.17.0.2"),
+			},
+		},
+		{
+			Qname: "_http._tcp.web.docker.",
+			Qtype: dns.TypeSRV,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.SRV("_http._tcp.web.docker.	5	IN	SRV	10 10 80 web.docker."),
+			},
+		},
+	}
+
+	ctx := context.Background()
+
+	for i, tc := range cases {
+		r := tc.Msg()
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+		_, err := d.ServeDNS(ctx, w, r)
+		if err != tc.Error {
+			t.Errorf("Test %d: expected no error, got %v", i, err)
+			continue
+		}
+
+		if err := test.SortAndCheck(w.Msg, tc); err != nil {
+			t.Errorf("Test %d: %v", i, err)
+		}
+	}
+}
+
+func TestDockerStaleTTLLowTTL(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       3,
+		connected: false,
+		zones:     []string{"docker."},
+		records: map[string][]net.IP{
+			"web.docker.": {net.ParseIP("172.17.0.2")},
+		},
+		srvs: map[string][]srvRecord{},
+	}
+
+	tc := test.Case{
+		Qname: "web.docker.",
+		Qtype: dns.TypeA,
+		Rcode: dns.RcodeSuccess,
+		Answer: []dns.RR{
+			test.A("web.docker.	3	IN	A	172.17.0.2"),
+		},
+	}
+
+	r := tc.Msg()
+	w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+	_, err := d.ServeDNS(context.Background(), w, r)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+
+	if err := test.SortAndCheck(w.Msg, tc); err != nil {
+		t.Errorf("error: %v", err)
+	}
+}
+
+func TestDockerConnectedNormalTTL(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker."},
+		records: map[string][]net.IP{
+			"web.docker.": {net.ParseIP("172.17.0.2")},
+		},
+		srvs: map[string][]srvRecord{},
+	}
+
+	tc := test.Case{
+		Qname: "web.docker.",
+		Qtype: dns.TypeA,
+		Rcode: dns.RcodeSuccess,
+		Answer: []dns.RR{
+			test.A("web.docker.	30	IN	A	172.17.0.2"),
+		},
+	}
+
+	r := tc.Msg()
+	w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+	_, err := d.ServeDNS(context.Background(), w, r)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+
+	if err := test.SortAndCheck(w.Msg, tc); err != nil {
+		t.Errorf("error: %v", err)
 	}
 }
