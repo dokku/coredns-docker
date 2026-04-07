@@ -606,6 +606,73 @@ func TestIntegrationSyncMetrics(t *testing.T) {
 	}
 }
 
+func TestIntegrationHostnameLabel(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		Labels: map[string]string{
+			"com.dokku.coredns-docker/hostname": "myapp,otherapp",
+		},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	// Verify container name resolves
+	fqdn := name + ".docker."
+	resp, _, err := queryDNS(t, d, fqdn, dns.TypeA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", fqdn, err)
+	}
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected A record for %s, got none", fqdn)
+	}
+
+	containerA, ok := resp.Answer[0].(*dns.A)
+	if !ok {
+		t.Fatalf("expected A record, got %T", resp.Answer[0])
+	}
+
+	// Verify first hostname label resolves
+	hostnameFqdn1 := "myapp.docker."
+	resp, _, err = queryDNS(t, d, hostnameFqdn1, dns.TypeA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", hostnameFqdn1, err)
+	}
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected A record for hostname %s, got none", hostnameFqdn1)
+	}
+
+	a1, ok := resp.Answer[0].(*dns.A)
+	if !ok {
+		t.Fatalf("expected A record, got %T", resp.Answer[0])
+	}
+	if !a1.A.Equal(containerA.A) {
+		t.Errorf("expected hostname %s to resolve to %s, got %s", hostnameFqdn1, containerA.A, a1.A)
+	}
+
+	// Verify second hostname label resolves
+	hostnameFqdn2 := "otherapp.docker."
+	resp, _, err = queryDNS(t, d, hostnameFqdn2, dns.TypeA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", hostnameFqdn2, err)
+	}
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected A record for hostname %s, got none", hostnameFqdn2)
+	}
+
+	a2, ok := resp.Answer[0].(*dns.A)
+	if !ok {
+		t.Fatalf("expected A record, got %T", resp.Answer[0])
+	}
+	if !a2.A.Equal(containerA.A) {
+		t.Errorf("expected hostname %s to resolve to %s, got %s", hostnameFqdn2, containerA.A, a2.A)
+	}
+}
+
 func TestIntegrationLastSyncTimeSet(t *testing.T) {
 	d, _ := setupIntegrationDocker(t, nil)
 

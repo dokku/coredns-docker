@@ -55,6 +55,50 @@ If no labels with the specified prefix are found, the plugin falls back to using
 - For a port mapping like `80/tcp`, it generates an SRV record for `_tcp._tcp.container-name.zone`.
 - For a port mapping without a protocol like `80`, it generates SRV records for both `_tcp._tcp` and `_udp._udp`.
 
+### Custom Hostname via Docker Labels
+
+To add custom DNS hostnames to a container, add a label in the format:
+
+```text
+[LABEL_PREFIX]/hostname=[HOSTNAME1],[HOSTNAME2],...
+```
+
+Where:
+
+- `LABEL_PREFIX` is the value of the `label_prefix` option (defaults to `com.dokku.coredns-docker`)
+- `HOSTNAME1`, `HOSTNAME2`, etc. are the custom hostnames to register
+
+The custom hostnames are registered **in addition to** the container's existing names (container name, network aliases, DNS names, and Docker Compose project.service names).
+
+Multiple hostnames can be specified as a comma-separated list. Whitespace around each hostname is trimmed. Empty values are ignored.
+
+**Example Docker Compose configuration:**
+
+```yaml
+services:
+  web:
+    image: nginx
+    labels:
+      - "com.dokku.coredns-docker/hostname=myapp,www"
+```
+
+**Example Docker run command:**
+
+```bash
+docker run -d \
+  --name web \
+  --label "com.dokku.coredns-docker/hostname=myapp,www" \
+  nginx
+```
+
+This will create A records for both custom hostnames in addition to the container name:
+
+- `web.docker.` -> container IP
+- `myapp.docker.` -> container IP
+- `www.docker.` -> container IP
+
+If SRV labels are also configured, SRV records are generated for all names including custom hostnames.
+
 ### SOA Records
 
 The plugin generates a synthetic SOA record for each configured zone. SOA records serve two purposes:
