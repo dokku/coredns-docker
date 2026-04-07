@@ -19,6 +19,8 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/miekg/dns"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
@@ -500,7 +502,13 @@ func TestIntegrationSyncMetrics(t *testing.T) {
 		},
 	}, nil, nil)
 
-	syncCountBefore := testutil.CollectAndCount(syncDuration)
+	getSyncSampleCount := func() uint64 {
+		m := &dto.Metric{}
+		_ = syncDuration.(prometheus.Metric).Write(m)
+		return m.GetHistogram().GetSampleCount()
+	}
+
+	syncCountBefore := getSyncSampleCount()
 
 	d.syncRecords(ctx)
 
@@ -521,9 +529,9 @@ func TestIntegrationSyncMetrics(t *testing.T) {
 	}
 
 	// Verify sync duration was observed
-	syncCountAfter := testutil.CollectAndCount(syncDuration)
-	if syncCountAfter <= syncCountBefore {
-		t.Errorf("expected sync_duration_seconds to be observed, before=%d after=%d", syncCountBefore, syncCountAfter)
+	syncCountAfter := getSyncSampleCount()
+	if syncCountAfter != syncCountBefore+1 {
+		t.Errorf("expected sync_duration_seconds sample count to increase by 1, before=%d after=%d", syncCountBefore, syncCountAfter)
 	}
 }
 
