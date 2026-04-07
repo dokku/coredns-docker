@@ -22,7 +22,7 @@ jobs:
       - name: Clone
         uses: actions/checkout@v6
       - name: Run hadolint
-        uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5
+        uses: hadolint/hadolint-action@v3.3.0
 
   markdown-lint:
     name: markdown-lint
@@ -31,7 +31,7 @@ jobs:
       - name: Clone
         uses: actions/checkout@v6
       - name: Run markdown-lint
-        uses: avto-dev/markdown-lint@04d43ee9191307b50935a753da3b775ab695eceb
+        uses: avto-dev/markdown-lint@v1
         with:
           config: ".github/linters/.markdown-lint.yaml"
           args: "./README.md"
@@ -43,7 +43,7 @@ jobs:
       - name: Clone
         uses: actions/checkout@v6
       - name: Run shellcheck
-        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38
+        uses: ludeeus/action-shellcheck@2.0.0
         env:
           SHELLCHECK_OPTS: -s bash
   shfmt:
@@ -53,7 +53,7 @@ jobs:
       - name: Clone
         uses: actions/checkout@v6
       - name: Run shfmt
-        uses: luizm/action-sh-checker@883217215b11c1fabbf00eb1a9a041f62d74c744
+        uses: luizm/action-sh-checker@v0.10.0
         env:
           GITHUB_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
           SHFMT_OPTS: -l -d -i 2
@@ -68,6 +68,6 @@ jobs:
       - name: Clone
         uses: actions/checkout@v6
       - name: Run yamllint
-        uses: ibiqlik/action-yamllint@2576378a8e339169678f9939646ee3ee325e845c
+        uses: ibiqlik/action-yamllint@v3
         with:
           config_file: ".github/linters/.yamllint.yaml"

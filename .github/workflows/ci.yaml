@@ -78,7 +78,7 @@ jobs:
         with:
           go-version-file: "go.mod"
       - name: Download prepared source
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coredns-source
           path: .coredns-build
@@ -115,7 +115,7 @@ jobs:
           bundler-cache: true
           working-directory: .github
       - name: Download all binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: binary-*
       - name: Reconstruct build directory
