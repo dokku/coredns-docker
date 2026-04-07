@@ -690,3 +690,115 @@ func TestIntegrationLastSyncTimeSet(t *testing.T) {
 		t.Error("expected lastSyncTime to be set after sync")
 	}
 }
+
+func TestIntegrationWildcard(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		Labels: map[string]string{
+			"com.dokku.coredns-docker/wildcard": "true",
+		},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	// Wildcard subdomain should resolve
+	wildcardFqdn := "anything." + name + ".docker."
+	resp, _, err := queryDNS(t, d, wildcardFqdn, dns.TypeA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", wildcardFqdn, err)
+	}
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected A record for wildcard %s, got none", wildcardFqdn)
+	}
+
+	wildcardA, ok := resp.Answer[0].(*dns.A)
+	if !ok {
+		t.Fatalf("expected A record, got %T", resp.Answer[0])
+	}
+
+	// Exact match should also resolve
+	exactFqdn := name + ".docker."
+	resp, _, err = queryDNS(t, d, exactFqdn, dns.TypeA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", exactFqdn, err)
+	}
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected A record for exact %s, got none", exactFqdn)
+	}
+
+	exactA, ok := resp.Answer[0].(*dns.A)
+	if !ok {
+		t.Fatalf("expected A record, got %T", resp.Answer[0])
+	}
+
+	// Both should resolve to the same IP
+	if !wildcardA.A.Equal(exactA.A) {
+		t.Errorf("expected wildcard and exact to resolve to same IP, got %s and %s", wildcardA.A, exactA.A)
+	}
+
+	// Deep subdomain should NOT match (RFC 4592)
+	deepFqdn := "deep.sub." + name + ".docker."
+	resp, _, _ = queryDNS(t, d, deepFqdn, dns.TypeA)
+	if resp != nil && resp.Rcode != dns.RcodeNameError {
+		t.Errorf("expected NXDOMAIN for deep subdomain %s, got rcode %d", deepFqdn, resp.Rcode)
+	}
+}
+
+func TestIntegrationWildcardExactPrecedence(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	// Create a wildcard container
+	wildcardName := testContainerName(t, "wildcard")
+	createTestContainer(t, cli, wildcardName, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		Labels: map[string]string{
+			"com.dokku.coredns-docker/wildcard": "true",
+		},
+	}, nil, nil)
+
+	// Create a container whose name would match the wildcard pattern
+	exactName := testContainerName(t, "exact")
+	createTestContainer(t, cli, exactName, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		Labels: map[string]string{
+			"com.dokku.coredns-docker/hostname": exactName + "." + wildcardName,
+		},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	// Query the hostname that matches both exact and wildcard
+	// The exact match should win
+	fqdn := exactName + "." + wildcardName + ".docker."
+	resp, _, err := queryDNS(t, d, fqdn, dns.TypeA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", fqdn, err)
+	}
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected A record for %s, got none", fqdn)
+	}
+
+	// Verify the response uses the exact container's IP (from the hostname label)
+	a, ok := resp.Answer[0].(*dns.A)
+	if !ok {
+		t.Fatalf("expected A record, got %T", resp.Answer[0])
+	}
+
+	// Get the exact container's IP to verify
+	exactResp, _, _ := queryDNS(t, d, exactName+".docker.", dns.TypeA)
+	if exactResp == nil || len(exactResp.Answer) == 0 {
+		t.Fatalf("expected A record for exact container %s, got none", exactName+".docker.")
+	}
+	exactA := exactResp.Answer[0].(*dns.A)
+	if !a.A.Equal(exactA.A) {
+		t.Errorf("expected exact match IP %s, got %s (wildcard may have taken precedence)", exactA.A, a.A)
+	}
+}

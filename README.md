@@ -99,6 +99,56 @@ This will create A records for both custom hostnames in addition to the containe
 
 If SRV labels are also configured, SRV records are generated for all names including custom hostnames.
 
+### Wildcard Records
+
+To enable wildcard DNS resolution for a container, add a label in the format:
+
+```text
+[LABEL_PREFIX]/wildcard=true
+```
+
+Where `LABEL_PREFIX` is the value of the `label_prefix` option (defaults to `com.dokku.coredns-docker`).
+
+When enabled, the plugin generates wildcard DNS entries (`*.name.zone.`) for all of the container's names (container name, network aliases, DNS names, Docker Compose project.service names, and custom hostnames). This allows any single-label subdomain to resolve to the container's IP address.
+
+**Example Docker Compose configuration:**
+
+```yaml
+services:
+  web:
+    image: nginx
+    labels:
+      - "com.dokku.coredns-docker/wildcard=true"
+```
+
+**Example Docker run command:**
+
+```bash
+docker run -d \
+  --name web \
+  --label "com.dokku.coredns-docker/wildcard=true" \
+  nginx
+```
+
+This will create both exact and wildcard A records:
+
+- `web.docker.` -> container IP (exact match)
+- `*.web.docker.` -> container IP (wildcard match)
+
+Any single-label subdomain will resolve:
+
+- `tenant1.web.docker.` -> container IP
+- `tenant2.web.docker.` -> container IP
+- `anything.web.docker.` -> container IP
+
+**Matching behavior:**
+
+- Wildcards match exactly one label per [RFC 4592](https://www.rfc-editor.org/rfc/rfc4592). `*.web.docker.` matches `foo.web.docker.` but does **not** match `foo.bar.web.docker.`.
+- Exact matches always take precedence over wildcard matches. If both `web.docker.` and `*.web.docker.` exist, a query for `web.docker.` returns the exact match.
+- If SRV labels are configured, wildcard SRV records are also generated (e.g., `_http._tcp.*.web.docker.`).
+
+**Use case:** Development environments where applications serve multiple subdomains, such as multi-tenant apps (`tenant1.myapp.docker`, `tenant2.myapp.docker`) or wildcard routing configurations.
+
 ### SOA Records
 
 The plugin generates a synthetic SOA record for each configured zone. SOA records serve two purposes:
@@ -216,6 +266,7 @@ When debug logging is enabled, the plugin logs messages at key decision points t
 | `Query: qname=<name> qtype=<type>` | A DNS query was received with the given name and type. |
 | `Query <name> not in zones [<zones>], passing to next plugin` | The query name does not match any configured zone, so the query is forwarded to the next plugin in the chain. |
 | `Lookup results for <name>: A/AAAA records=<n>, SRV records=<n>, connected=<bool>` | Shows the number of matching records found in the internal cache and the Docker connection status. |
+| `Wildcard match for <name> via <wildcard>` | No exact match was found, but a wildcard record matched. The query name's leftmost label was replaced with `*` to find the match. |
 | `No records found for <name>, falling through to next plugin` | No records exist for the name and `fallthrough` is configured, so the query is forwarded to the next plugin. |
 | `SOA query at zone apex for <zone>` | A SOA query was received for the zone apex, and the synthetic SOA record is returned as the answer. |
 | `NS query at zone apex for <zone>` | An NS query was received for the zone apex, and the synthetic NS record is returned as the answer. |

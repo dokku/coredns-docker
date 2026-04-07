@@ -108,6 +108,27 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	d.mu.RLock()
 	ips, ok := d.records[qname]
 	srvs, srvOk := d.srvs[qname]
+	if !ok && !srvOk {
+		// Try wildcard: replace the first non-underscore label with *
+		// This handles both plain names (foo.web.docker. → *.web.docker.)
+		// and SRV-prefixed names (_http._tcp.foo.web.docker. → _http._tcp.*.web.docker.)
+		labels := dns.SplitDomainName(qname)
+		wildcardIdx := 0
+		for wildcardIdx < len(labels) && strings.HasPrefix(labels[wildcardIdx], "_") {
+			wildcardIdx++
+		}
+		if wildcardIdx < len(labels)-1 {
+			wildcardLabels := make([]string, len(labels))
+			copy(wildcardLabels, labels)
+			wildcardLabels[wildcardIdx] = "*"
+			wildcardName := strings.Join(wildcardLabels, ".") + "."
+			ips, ok = d.records[wildcardName]
+			srvs, srvOk = d.srvs[wildcardName]
+			if ok || srvOk {
+				log.Debugf("Wildcard match for %s via %s", qname, wildcardName)
+			}
+		}
+	}
 	isConnected := d.connected
 	d.mu.RUnlock()
 	log.Debugf("Lookup results for %s: A/AAAA records=%d, SRV records=%d, connected=%t", qname, len(ips), len(srvs), isConnected)
@@ -445,6 +466,13 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 			}
 		}
 
+		// Parse wildcard label
+		wildcardLabel := input.LabelPrefix + "/wildcard"
+		if input.LabelPrefix == "" {
+			wildcardLabel = "wildcard"
+		}
+		enableWildcard := inspect.Config.Labels[wildcardLabel] == "true"
+
 		// Add SRV records based on labels
 		srvPrefix := input.LabelPrefix + "/srv."
 		if input.LabelPrefix == "" {
@@ -530,12 +558,25 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 					}
 					newRecords[fqdn] = append(newRecords[fqdn], ip)
 
+					if enableWildcard {
+						wildcardFqdn := "*." + fqdn
+						newRecords[wildcardFqdn] = append(newRecords[wildcardFqdn], ip)
+					}
+
 					for srvKey, port := range containerSrvs {
 						srvName := srvKey + "." + fqdn
 						newSrvs[srvName] = append(newSrvs[srvName], srvRecord{
 							target: fqdn,
 							port:   port,
 						})
+
+						if enableWildcard {
+							wildcardSrvName := srvKey + ".*." + fqdn
+							newSrvs[wildcardSrvName] = append(newSrvs[wildcardSrvName], srvRecord{
+								target: fqdn,
+								port:   port,
+							})
+						}
 					}
 				}
 			}
