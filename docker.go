@@ -39,7 +39,7 @@ type Docker struct {
 
 	ttl         uint32
 	client      *client.Client
-	zone        string
+	zones       []string
 	labelPrefix string
 	maxBackoff  time.Duration
 	networks    []string
@@ -61,7 +61,7 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	qname := strings.ToLower(state.Name())
 	qtype := state.QType()
 
-	if plugin.Zones([]string{d.zone}).Matches(qname) == "" {
+	if plugin.Zones(d.zones).Matches(qname) == "" {
 		return plugin.NextOrFailure(d.Name(), d.Next, ctx, w, r)
 	}
 
@@ -231,7 +231,7 @@ func (d *Docker) syncRecords(ctx context.Context) {
 
 	newRecords, newSrvs := generateRecords(ctx, GenerateRecordsInput{
 		Containers:  containers,
-		Zone:        d.zone,
+		Zones:       d.zones,
 		Inspector:   d.client,
 		LabelPrefix: d.labelPrefix,
 		Networks:    d.networks,
@@ -255,8 +255,8 @@ type GenerateRecordsInput struct {
 	Inspector ContainerInspector
 	// Containers is the list of containers to generate records for.
 	Containers []container.Summary
-	// Zone is the domain to generate records for.
-	Zone string
+	// Zones is the list of domains to generate records for.
+	Zones []string
 	// LabelPrefix is the label prefix to generate records for.
 	LabelPrefix string
 	// Networks is the list of networks to generate records for.
@@ -415,18 +415,20 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 				if name == "" {
 					continue
 				}
-				fqdn := strings.ToLower(name + "." + input.Zone)
-				if !strings.HasSuffix(fqdn, ".") {
-					fqdn += "."
-				}
-				newRecords[fqdn] = append(newRecords[fqdn], ip)
+				for _, zone := range input.Zones {
+					fqdn := strings.ToLower(name + "." + zone)
+					if !strings.HasSuffix(fqdn, ".") {
+						fqdn += "."
+					}
+					newRecords[fqdn] = append(newRecords[fqdn], ip)
 
-				for srvKey, port := range containerSrvs {
-					srvName := srvKey + "." + fqdn
-					newSrvs[srvName] = append(newSrvs[srvName], srvRecord{
-						target: fqdn,
-						port:   port,
-					})
+					for srvKey, port := range containerSrvs {
+						srvName := srvKey + "." + fqdn
+						newSrvs[srvName] = append(newSrvs[srvName], srvRecord{
+							target: fqdn,
+							port:   port,
+						})
+					}
 				}
 			}
 		}

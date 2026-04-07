@@ -13,7 +13,7 @@ func TestParse(t *testing.T) {
 		input            string
 		shouldErr        bool
 		expectedTTL      uint32
-		expectedZone     string
+		expectedZones    []string
 		expectedPrefix   string
 		expectedBackoff  time.Duration
 		expectedNetworks []string
@@ -23,7 +23,7 @@ func TestParse(t *testing.T) {
 			`docker`,
 			false,
 			DefaultTTL,
-			"docker.",
+			[]string{"docker."},
 			"com.dokku.coredns-docker",
 			60 * time.Second,
 			nil,
@@ -35,7 +35,19 @@ func TestParse(t *testing.T) {
 			}`,
 			false,
 			DefaultTTL,
-			"example.org.",
+			[]string{"example.org."},
+			"com.dokku.coredns-docker",
+			60 * time.Second,
+			nil,
+			fall.F{},
+		},
+		{
+			`docker {
+				zone example.org internal.local
+			}`,
+			false,
+			DefaultTTL,
+			[]string{"example.org.", "internal.local."},
 			"com.dokku.coredns-docker",
 			60 * time.Second,
 			nil,
@@ -51,7 +63,7 @@ func TestParse(t *testing.T) {
 			}`,
 			false,
 			60,
-			"example.org.",
+			[]string{"example.org."},
 			"com.example",
 			30 * time.Second,
 			[]string{"bridge", "my-custom-network"},
@@ -64,7 +76,7 @@ func TestParse(t *testing.T) {
 			}`,
 			false,
 			DefaultTTL,
-			"example.org.",
+			[]string{"example.org."},
 			"",
 			60 * time.Second,
 			nil,
@@ -76,7 +88,7 @@ func TestParse(t *testing.T) {
 			}`,
 			false,
 			DefaultTTL,
-			"docker.",
+			[]string{"docker."},
 			"com.dokku.coredns-docker",
 			60 * time.Second,
 			nil,
@@ -88,7 +100,7 @@ func TestParse(t *testing.T) {
 			}`,
 			false,
 			DefaultTTL,
-			"docker.",
+			[]string{"docker."},
 			"com.dokku.coredns-docker",
 			60 * time.Second,
 			nil,
@@ -100,7 +112,7 @@ func TestParse(t *testing.T) {
 			}`,
 			true,
 			0,
-			"",
+			nil,
 			"",
 			0,
 			nil,
@@ -112,7 +124,19 @@ func TestParse(t *testing.T) {
 			}`,
 			true,
 			0,
+			nil,
 			"",
+			0,
+			nil,
+			fall.F{},
+		},
+		{
+			`docker {
+				zone
+			}`,
+			true,
+			0,
+			nil,
 			"",
 			0,
 			nil,
@@ -126,7 +150,7 @@ func TestParse(t *testing.T) {
 			labelPrefix: "com.dokku.coredns-docker",
 			maxBackoff:  60 * time.Second,
 			ttl:         DefaultTTL,
-			zone:        "docker.",
+			zones:       []string{"docker."},
 		}
 		err := parse(c, d)
 
@@ -146,8 +170,14 @@ func TestParse(t *testing.T) {
 			t.Errorf("Test %d: expected TTL %d, got %d", i, test.expectedTTL, d.ttl)
 		}
 
-		if d.zone != test.expectedZone {
-			t.Errorf("Test %d: expected zone %s, got %s", i, test.expectedZone, d.zone)
+		if len(d.zones) != len(test.expectedZones) {
+			t.Errorf("Test %d: expected %d zones, got %d", i, len(test.expectedZones), len(d.zones))
+		} else {
+			for j := range d.zones {
+				if d.zones[j] != test.expectedZones[j] {
+					t.Errorf("Test %d: expected zone %s at index %d, got %s", i, test.expectedZones[j], j, d.zones[j])
+				}
+			}
 		}
 
 		if d.labelPrefix != test.expectedPrefix {

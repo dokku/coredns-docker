@@ -74,13 +74,13 @@ docker {
     max_backoff DURATION
     networks NETWORK...
     ttl DURATION
-    zone ZONE
+    zone ZONE [ZONE...]
 }
 ```
 
 - `fallthrough` **[ZONES...]** - If a query matches the plugin's zone but no record is found, pass the query to the next plugin instead of returning NXDOMAIN. If **ZONES** are specified, only queries for names within those zones will fall through. If no zones are given, all unmatched queries fall through. By default, the plugin returns NXDOMAIN for unknown names. Use this when composing with other plugins that serve the same zone (e.g., `file` as a fallback for static records).
 
-- `zone` is the domain for which the plugin will respond. Defaults to `docker.` and cannot be empty.
+- `zone` is the domain (or domains) for which the plugin will respond. Multiple zones can be specified separated by spaces. Defaults to `docker.` and cannot be empty.
 
 - `ttl` allows you to set a custom TTL for responses. **DURATION** defaults to `30 seconds`. The minimum TTL allowed is `0` seconds, and the maximum is capped at `3600` seconds. Setting TTL to 0 will prevent records from being cached. The unit for the value is seconds.
 
@@ -111,6 +111,17 @@ Enable docker with and resolve all containers with `.docker.localhost` as the su
 docker:1053 {
     docker {
         zone docker.localhost
+    }
+    cache 30
+}
+```
+
+Enable docker with multiple zones. Containers will be resolvable under both `.docker.localhost` and `.internal.localhost`. Note that all zones must also be listed in the server block declaration.
+
+```text
+docker.localhost:1053 internal.localhost:1053 {
+    docker {
+        zone docker.localhost internal.localhost
     }
     cache 30
 }

@@ -101,6 +101,26 @@ wait_for_record() {
   return 1
 }
 
+wait_for_record_on_port() {
+  local name="$1"
+  local type="${2:-A}"
+  local port="${3:-$COREDNS_PORT}"
+  local retries=20
+  local i=0
+  while [ "$i" -lt "$retries" ]; do
+    local result
+    result=$(dig +short +time=1 +tries=1 @127.0.0.1 -p "$port" "$name" "$type" 2>/dev/null)
+    if [ -n "$result" ]; then
+      echo "$result"
+      return 0
+    fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+  echo "Record $name ($type) not found on port $port after waiting" >&2
+  return 1
+}
+
 wait_for_record_gone() {
   local name="$1"
   local type="${2:-A}"
@@ -307,4 +327,58 @@ assert_output_contains() {
   [[ "$output" =~ [[:space:]]10[[:space:]]+IN[[:space:]]+A[[:space:]] ]]
 
   docker rm -f coredns-e2e-ttl
+}
+
+@test "[e2e] multi-zone: container resolves under multiple zones" {
+  local MULTI_COREFILE
+  MULTI_COREFILE="$(mktemp /tmp/Corefile.multizone.XXXXXX)"
+  local MULTI_PORT=15354
+  cat >"$MULTI_COREFILE" <<EOF
+docker.localhost:${MULTI_PORT} internal.localhost:${MULTI_PORT} {
+    log
+    errors
+    debug
+    docker {
+        zone docker.localhost internal.localhost
+        ttl 10
+        networks bridge ${TEST_NETWORK}
+    }
+}
+EOF
+
+  "$COREDNS_BINARY" -conf "$MULTI_COREFILE" &
+  local MULTI_PID=$!
+
+  # Wait for CoreDNS to become ready
+  local retries=20 i=0
+  while [ "$i" -lt "$retries" ]; do
+    if dig +short +time=1 +tries=1 @127.0.0.1 -p "$MULTI_PORT" version.bind chaos txt >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+
+  docker run -d --name coredns-e2e-multizone --network bridge alpine sleep 3600
+
+  # Verify resolution in first zone
+  run wait_for_record_on_port "coredns-e2e-multizone.docker.localhost" "A" "$MULTI_PORT"
+  assert_success
+  [[ "$output" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+  local ip1="$output"
+
+  # Verify resolution in second zone
+  run wait_for_record_on_port "coredns-e2e-multizone.internal.localhost" "A" "$MULTI_PORT"
+  assert_success
+  [[ "$output" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+  local ip2="$output"
+
+  # Both zones should resolve to the same IP
+  assert_equal "$ip1" "$ip2"
+
+  # Cleanup
+  docker rm -f coredns-e2e-multizone
+  kill "$MULTI_PID" 2>/dev/null || true
+  wait "$MULTI_PID" 2>/dev/null || true
+  rm -f "$MULTI_COREFILE"
 }

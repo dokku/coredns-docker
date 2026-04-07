@@ -58,7 +58,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -100,7 +100,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -146,7 +146,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -190,7 +190,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -241,7 +241,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -292,7 +292,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -359,7 +359,7 @@ func TestGenerateRecords(t *testing.T) {
 					{ID: "container1"},
 					{ID: "container2"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 				Networks:    []string{"bridge"},
 			},
@@ -403,7 +403,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "",
 			},
 			expected: struct {
@@ -450,7 +450,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -493,7 +493,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -540,7 +540,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -587,7 +587,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -631,7 +631,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -686,7 +686,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -725,7 +725,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -756,7 +756,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -791,7 +791,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -829,7 +829,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 				Networks:    []string{"custom"},
 			},
@@ -868,7 +868,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 				Networks:    []string{"bridge", "custom"},
 			},
@@ -907,7 +907,7 @@ func TestGenerateRecords(t *testing.T) {
 				Containers: []container.Summary{
 					{ID: "container1"},
 				},
-				Zone:        "docker.",
+				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
 			expected: struct {
@@ -918,6 +918,99 @@ func TestGenerateRecords(t *testing.T) {
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+			},
+		},
+		{
+			name: "multi-zone basic container",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker.", "internal."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+			}{
+				records: map[string][]net.IP{
+					"web.docker.":   {net.ParseIP("172.17.0.2")},
+					"web.internal.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{},
+			},
+		},
+		{
+			name: "multi-zone with SRV label",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/srv._tcp._http": "80",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker.", "internal."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+			}{
+				records: map[string][]net.IP{
+					"web.docker.":   {net.ParseIP("172.17.0.2")},
+					"web.internal.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{
+					"_http._tcp.web.docker.": {
+						{target: "web.docker.", port: 80},
+					},
+					"_http._tcp.web.internal.": {
+						{target: "web.internal.", port: 80},
+					},
+				},
 			},
 		},
 	}

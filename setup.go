@@ -24,7 +24,7 @@ func setup(c *caddy.Controller) error {
 		records:     make(map[string][]net.IP),
 		srvs:        make(map[string][]srvRecord),
 		ttl:         DefaultTTL,
-		zone:        "docker.",
+		zones:       []string{"docker."},
 	}
 	if err := parse(c, d); err != nil {
 		return plugin.Error(pluginName, err)
@@ -103,14 +103,17 @@ func parse(c *caddy.Controller, d *Docker) error {
 			case "fallthrough":
 				d.Fall.SetZonesFromArgs(c.RemainingArgs())
 			case "zone":
-				if !c.NextArg() {
+				args := c.RemainingArgs()
+				if len(args) == 0 {
 					return c.ArgErr()
 				}
-
-				// trim periods from beginning and end of zone, then ensure it ends with a period
-				d.zone = strings.Trim(c.Val(), ".") + "."
-				if d.zone == "." {
-					return c.Err("zone cannot be empty")
+				d.zones = make([]string, 0, len(args))
+				for _, arg := range args {
+					z := strings.Trim(arg, ".") + "."
+					if z == "." {
+						return c.Err("zone cannot be empty")
+					}
+					d.zones = append(d.zones, z)
 				}
 			default:
 				return c.Errf("unknown property '%s'", selector)

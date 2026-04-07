@@ -15,7 +15,7 @@ func TestDocker(t *testing.T) {
 	d := &Docker{
 		Next: test.ErrorHandler(),
 		ttl:  DefaultTTL,
-		zone: "docker.",
+		zones: []string{"docker."},
 		records: map[string][]net.IP{
 			"web.docker.":          {net.ParseIP("172.17.0.2")},
 			"db.docker.":           {net.ParseIP("172.17.0.3")},
@@ -153,7 +153,7 @@ func TestDockerEmptyPrefix(t *testing.T) {
 	d := &Docker{
 		Next:        test.ErrorHandler(),
 		ttl:         DefaultTTL,
-		zone:        "docker.",
+		zones:       []string{"docker."},
 		labelPrefix: "",
 		srvs: map[string][]srvRecord{
 			"_http._tcp.web.docker.": {
@@ -188,7 +188,7 @@ func TestDockerFallthrough(t *testing.T) {
 	d := &Docker{
 		Next: test.ErrorHandler(),
 		ttl:  DefaultTTL,
-		zone: "docker.",
+		zones: []string{"docker."},
 		Fall: fall.Root,
 		records: map[string][]net.IP{
 			"web.docker.": {net.ParseIP("172.17.0.2")},
@@ -244,7 +244,7 @@ func TestDockerFallthroughZoneSpecific(t *testing.T) {
 	d := &Docker{
 		Next: test.ErrorHandler(),
 		ttl:  DefaultTTL,
-		zone: "docker.",
+		zones: []string{"docker."},
 		Fall: fall.F{Zones: []string{"other."}},
 		records: map[string][]net.IP{
 			"web.docker.": {net.ParseIP("172.17.0.2")},
@@ -271,5 +271,91 @@ func TestDockerFallthroughZoneSpecific(t *testing.T) {
 
 	if err := test.SortAndCheck(w.Msg, tc); err != nil {
 		t.Errorf("error: %v", err)
+	}
+}
+
+func TestDockerMultiZone(t *testing.T) {
+	d := &Docker{
+		Next:  test.ErrorHandler(),
+		ttl:   DefaultTTL,
+		zones: []string{"docker.", "internal."},
+		records: map[string][]net.IP{
+			"web.docker.":   {net.ParseIP("172.17.0.2")},
+			"web.internal.": {net.ParseIP("172.17.0.2")},
+		},
+		srvs: map[string][]srvRecord{
+			"_http._tcp.web.docker.": {
+				{target: "web.docker.", port: 80},
+			},
+			"_http._tcp.web.internal.": {
+				{target: "web.internal.", port: 80},
+			},
+		},
+	}
+
+	var cases = []test.Case{
+		{
+			Qname: "web.docker.",
+			Qtype: dns.TypeA,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.A("web.docker.	30	IN	A	172.17.0.2"),
+			},
+		},
+		{
+			Qname: "web.internal.",
+			Qtype: dns.TypeA,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.A("web.internal.	30	IN	A	172.17.0.2"),
+			},
+		},
+		{
+			Qname: "_http._tcp.web.docker.",
+			Qtype: dns.TypeSRV,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.SRV("_http._tcp.web.docker.	30	IN	SRV	10 10 80 web.docker."),
+			},
+		},
+		{
+			Qname: "_http._tcp.web.internal.",
+			Qtype: dns.TypeSRV,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.SRV("_http._tcp.web.internal.	30	IN	SRV	10 10 80 web.internal."),
+			},
+		},
+		{
+			// Query for a zone not in the configured list falls through
+			Qname:  "web.other.",
+			Qtype:  dns.TypeA,
+			Rcode:  dns.RcodeServerFailure,
+			Answer: []dns.RR{},
+		},
+	}
+
+	ctx := context.Background()
+
+	for i, tc := range cases {
+		r := tc.Msg()
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+		_, err := d.ServeDNS(ctx, w, r)
+		if err != tc.Error {
+			t.Errorf("Test %d: expected error %v, got %v", i, tc.Error, err)
+			continue
+		}
+
+		if w.Msg == nil {
+			if tc.Rcode != dns.RcodeSuccess || len(tc.Answer) != 0 {
+				t.Errorf("Test %d: nil message", i)
+			}
+			continue
+		}
+
+		if err := test.SortAndCheck(w.Msg, tc); err != nil {
+			t.Errorf("Test %d: %v", i, err)
+		}
 	}
 }
