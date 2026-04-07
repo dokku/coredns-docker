@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/coredns/coredns/plugin/pkg/dnstest"
+	"github.com/coredns/coredns/plugin/pkg/fall"
 	"github.com/coredns/coredns/plugin/test"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -329,5 +330,51 @@ func TestIntegrationNetworkAlias(t *testing.T) {
 	}
 	if resp == nil || len(resp.Answer) == 0 {
 		t.Fatalf("expected A record for container name %s, got none", containerFqdn)
+	}
+}
+
+func TestIntegrationFallthrough(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	d.Fall = fall.Root
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	// Existing container should still resolve
+	fqdn := name + ".docker."
+	resp, _, err := queryDNS(t, d, fqdn, dns.TypeA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", fqdn, err)
+	}
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected A record for %s, got none", fqdn)
+	}
+
+	// Nonexistent name should fall through to ErrorHandler (SERVFAIL)
+	resp, rcode, _ := queryDNS(t, d, "nonexistent.docker.", dns.TypeA)
+	if rcode != dns.RcodeServerFailure {
+		t.Errorf("expected SERVFAIL for nonexistent with fallthrough, got rcode %d (resp: %v)", rcode, resp)
+	}
+}
+
+func TestIntegrationNoFallthrough(t *testing.T) {
+	d, _ := setupIntegrationDocker(t, nil)
+
+	// No fallthrough configured (default)
+	resp, _, err := queryDNS(t, d, "nonexistent.docker.", dns.TypeA)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if resp.Rcode != dns.RcodeNameError {
+		t.Errorf("expected NXDOMAIN for nonexistent without fallthrough, got rcode %d", resp.Rcode)
 	}
 }

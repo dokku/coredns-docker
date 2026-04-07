@@ -211,10 +211,10 @@ assert_output_contains() {
   docker rm -f coredns-e2e-v4only
 }
 
-@test "[e2e] nonexistent container: query returns SERVFAIL" {
+@test "[e2e] nonexistent container: query returns NXDOMAIN" {
   run dig +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-nonexistent.${COREDNS_ZONE}" A
   assert_success
-  assert_output_contains "status: SERVFAIL"
+  assert_output_contains "status: NXDOMAIN"
 }
 
 @test "[e2e] container removal: record is cleared after container is removed" {
@@ -233,7 +233,7 @@ assert_output_contains() {
   # Verify record is gone
   run dig +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-ephemeral.${COREDNS_ZONE}" A
   assert_success
-  assert_output_contains "status: SERVFAIL"
+  assert_output_contains "status: NXDOMAIN"
 }
 
 @test "[e2e] network alias: container resolves via network alias" {
@@ -277,7 +277,7 @@ assert_output_contains() {
 
   run dig +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-filtered.${COREDNS_ZONE}" A
   assert_success
-  assert_output_contains "status: SERVFAIL"
+  assert_output_contains "status: NXDOMAIN"
 
   docker rm -f coredns-e2e-filtered
   docker network rm coredns-e2e-unmonitored 2>/dev/null || true

@@ -69,6 +69,7 @@ A binary will be created at `bin/coredns`.
 
 ```text
 docker {
+    fallthrough [ZONES...]
     label_prefix PREFIX
     max_backoff DURATION
     networks NETWORK...
@@ -76,6 +77,8 @@ docker {
     zone ZONE
 }
 ```
+
+- `fallthrough` **[ZONES...]** - If a query matches the plugin's zone but no record is found, pass the query to the next plugin instead of returning NXDOMAIN. If **ZONES** are specified, only queries for names within those zones will fall through. If no zones are given, all unmatched queries fall through. By default, the plugin returns NXDOMAIN for unknown names. Use this when composing with other plugins that serve the same zone (e.g., `file` as a fallback for static records).
 
 - `zone` is the domain for which the plugin will respond. Defaults to `docker.` and cannot be empty.
 
