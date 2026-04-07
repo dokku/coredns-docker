@@ -249,6 +249,7 @@ If monitoring is enabled (via the *prometheus* directive) the following metrics 
 - `coredns_docker_failed_requests_total{server}` - Counter of DNS requests failed.
 - `coredns_docker_request_duration_seconds{server, type}` - Histogram of DNS request durations in seconds. The `type` label indicates the query type (e.g., `A`, `AAAA`, `SRV`).
 - `coredns_docker_stale_requests_total{server}` - Counter of DNS requests served from stale data during Docker daemon disconnect.
+- `coredns_docker_fallthrough_requests_total{server}` - Counter of DNS requests passed to the next plugin via fallthrough.
 - `coredns_docker_last_sync_timestamp_seconds` - Unix timestamp of the last successful record sync from Docker. This can be used to monitor how fresh the plugin's data is.
 - `coredns_docker_records_total` - Number of A/AAAA DNS record names currently tracked.
 - `coredns_docker_srv_records_total` - Number of SRV DNS record names currently tracked.
