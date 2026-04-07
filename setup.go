@@ -29,6 +29,8 @@ func setup(c *caddy.Controller) error {
 	if err := parse(c, d); err != nil {
 		return plugin.Error(pluginName, err)
 	}
+	log.Debugf("Configuration: zones=[%s], ttl=%d, label_prefix=%q, networks=[%s], max_backoff=%s",
+		strings.Join(d.zones, ", "), d.ttl, d.labelPrefix, strings.Join(d.networks, ", "), d.maxBackoff)
 
 	// Create a new Docker client.
 	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
