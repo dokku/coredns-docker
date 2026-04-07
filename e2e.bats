@@ -331,6 +331,49 @@ assert_output_contains() {
   docker rm -f coredns-e2e-compose
 }
 
+@test "[e2e] hostname label: container resolves via hostname label" {
+  docker run -d --name coredns-e2e-hostname --network bridge \
+    --label "com.dokku.coredns-docker/hostname=myapp,otherapp" \
+    alpine sleep 3600
+
+  # Verify container name resolves
+  run wait_for_record "coredns-e2e-hostname.${COREDNS_ZONE}"
+  assert_success
+  [[ "$output" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+  local container_ip="$output"
+
+  # Verify first hostname resolves to same IP
+  run wait_for_record "myapp.${COREDNS_ZONE}"
+  assert_success
+  assert_equal "$container_ip" "$output"
+
+  # Verify second hostname resolves to same IP
+  run wait_for_record "otherapp.${COREDNS_ZONE}"
+  assert_success
+  assert_equal "$container_ip" "$output"
+
+  docker rm -f coredns-e2e-hostname
+}
+
+@test "[e2e] hostname label with SRV: SRV records created for hostname names" {
+  docker run -d --name coredns-e2e-hostname-srv --network bridge \
+    --label "com.dokku.coredns-docker/hostname=myapp" \
+    --label "com.dokku.coredns-docker/srv._tcp._http=80" \
+    alpine sleep 3600
+
+  # Verify SRV record for container name
+  run wait_for_record "_http._tcp.coredns-e2e-hostname-srv.${COREDNS_ZONE}" "SRV"
+  assert_success
+  assert_output_contains "80 coredns-e2e-hostname-srv.${COREDNS_ZONE}."
+
+  # Verify SRV record for hostname label
+  run wait_for_record "_http._tcp.myapp.${COREDNS_ZONE}" "SRV"
+  assert_success
+  assert_output_contains "80 myapp.${COREDNS_ZONE}."
+
+  docker rm -f coredns-e2e-hostname-srv
+}
+
 @test "[e2e] network filtering: container on unmonitored network does not resolve" {
   docker network create coredns-e2e-unmonitored 2>/dev/null || true
   docker run -d --name coredns-e2e-filtered --network coredns-e2e-unmonitored alpine sleep 3600

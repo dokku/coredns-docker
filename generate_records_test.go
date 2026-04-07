@@ -1013,6 +1013,370 @@ func TestGenerateRecords(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "container with single hostname label",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/hostname": "myapp",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+			}{
+				records: map[string][]net.IP{
+					"web.docker.":   {net.ParseIP("172.17.0.2")},
+					"myapp.docker.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{},
+			},
+		},
+		{
+			name: "container with comma-separated hostname labels",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/hostname": "app1,app2,app3",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+			}{
+				records: map[string][]net.IP{
+					"web.docker.":  {net.ParseIP("172.17.0.2")},
+					"app1.docker.": {net.ParseIP("172.17.0.2")},
+					"app2.docker.": {net.ParseIP("172.17.0.2")},
+					"app3.docker.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{},
+			},
+		},
+		{
+			name: "container with hostname label with whitespace",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/hostname": " app1 , app2 , app3 ",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+			}{
+				records: map[string][]net.IP{
+					"web.docker.":  {net.ParseIP("172.17.0.2")},
+					"app1.docker.": {net.ParseIP("172.17.0.2")},
+					"app2.docker.": {net.ParseIP("172.17.0.2")},
+					"app3.docker.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{},
+			},
+		},
+		{
+			name: "container with empty hostname label",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/hostname": "",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+			}{
+				records: map[string][]net.IP{
+					"web.docker.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{},
+			},
+		},
+		{
+			name: "container with hostname label containing only commas and spaces",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/hostname": " , , ",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+			}{
+				records: map[string][]net.IP{
+					"web.docker.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{},
+			},
+		},
+		{
+			name: "container with hostname label and empty label prefix",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"hostname": "myapp",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "",
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+			}{
+				records: map[string][]net.IP{
+					"web.docker.":   {net.ParseIP("172.17.0.2")},
+					"myapp.docker.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{},
+			},
+		},
+		{
+			name: "container with hostname label and SRV records",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/hostname":      "myapp",
+									"com.dokku.coredns-docker/srv._tcp._http": "80",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+			}{
+				records: map[string][]net.IP{
+					"web.docker.":   {net.ParseIP("172.17.0.2")},
+					"myapp.docker.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{
+					"_http._tcp.web.docker.": {
+						{target: "web.docker.", port: 80},
+					},
+					"_http._tcp.myapp.docker.": {
+						{target: "myapp.docker.", port: 80},
+					},
+				},
+			},
+		},
+		{
+			name: "container with hostname label and multi-zone",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/hostname": "myapp",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker.", "internal."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+			}{
+				records: map[string][]net.IP{
+					"web.docker.":     {net.ParseIP("172.17.0.2")},
+					"web.internal.":   {net.ParseIP("172.17.0.2")},
+					"myapp.docker.":   {net.ParseIP("172.17.0.2")},
+					"myapp.internal.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{},
+			},
+		},
 	}
 
 	for _, tt := range tests {

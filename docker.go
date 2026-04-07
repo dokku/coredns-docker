@@ -430,6 +430,21 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 		project := inspect.Config.Labels["com.docker.compose.project"]
 		service := inspect.Config.Labels["com.docker.compose.service"]
 
+		// Parse hostname label for additional DNS names
+		hostnameLabel := input.LabelPrefix + "/hostname"
+		if input.LabelPrefix == "" {
+			hostnameLabel = "hostname"
+		}
+		var hostnameNames []string
+		if hostnameValue, ok := inspect.Config.Labels[hostnameLabel]; ok && hostnameValue != "" {
+			for _, h := range strings.Split(hostnameValue, ",") {
+				h = strings.TrimSpace(h)
+				if h != "" {
+					hostnameNames = append(hostnameNames, h)
+				}
+			}
+		}
+
 		// Add SRV records based on labels
 		srvPrefix := input.LabelPrefix + "/srv."
 		if input.LabelPrefix == "" {
@@ -501,6 +516,8 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 			if project != "" && service != "" {
 				names = append(names, project+"."+service)
 			}
+
+			names = append(names, hostnameNames...)
 
 			for _, name := range names {
 				if name == "" {
