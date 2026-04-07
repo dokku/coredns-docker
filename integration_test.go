@@ -19,6 +19,7 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/miekg/dns"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 const testContainerPrefix = "coredns-docker-test-"
@@ -483,6 +484,46 @@ func TestIntegrationReadyNoClient(t *testing.T) {
 
 	if d.Ready() {
 		t.Error("expected Ready() to return false when client is nil")
+	}
+}
+
+func TestIntegrationSyncMetrics(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		Labels: map[string]string{
+			"com.dokku.coredns-docker/srv._tcp._http": "80",
+		},
+	}, nil, nil)
+
+	syncCountBefore := testutil.CollectAndCount(syncDuration)
+
+	d.syncRecords(ctx)
+
+	// Verify record gauges are set
+	records := testutil.ToFloat64(recordsCount)
+	if records < 1 {
+		t.Errorf("expected records_total >= 1, got %f", records)
+	}
+
+	srvRecords := testutil.ToFloat64(srvRecordsCount)
+	if srvRecords < 1 {
+		t.Errorf("expected srv_records_total >= 1, got %f", srvRecords)
+	}
+
+	containers := testutil.ToFloat64(containersCount)
+	if containers < 1 {
+		t.Errorf("expected containers_total >= 1, got %f", containers)
+	}
+
+	// Verify sync duration was observed
+	syncCountAfter := testutil.CollectAndCount(syncDuration)
+	if syncCountAfter <= syncCountBefore {
+		t.Errorf("expected sync_duration_seconds to be observed, before=%d after=%d", syncCountBefore, syncCountAfter)
 	}
 }
 
