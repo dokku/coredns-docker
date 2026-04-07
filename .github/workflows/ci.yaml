@@ -15,22 +15,144 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: build
+  prepare:
+    name: prepare
     runs-on: ubuntu-24.04
-    env:
-      GITHUB_ACCESS_TOKEN: ${{ secrets.GH_ACCESS_TOKEN }}
-      PACKAGECLOUD_TOKEN: ${{ secrets.PACKAGECLOUD_TOKEN }}
-
+    outputs:
+      gitcommit: ${{ steps.metadata.outputs.gitcommit }}
+      version: ${{ steps.metadata.outputs.version }}
     steps:
       - uses: actions/checkout@v6
-      - name: make version
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+      - name: Prepare coredns source
         run: |
-          make version .env.docker
-      - run: make ci-report
-      - run: make build-docker-image
-      - run: make build-in-docker
-      - run: make validate-in-docker
+          git clone https://github.com/coredns/coredns.git .coredns-build
+          cd .coredns-build
+          git fetch --tags
+          git checkout $(git describe --tags --abbrev=0)
+          echo "docker:github.com/dokku/coredns-docker" >> plugin.cfg
+          go mod edit -replace github.com/dokku/coredns-docker=../../coredns-docker
+          go mod download
+          make gen
+      - name: Extract metadata
+        id: metadata
+        run: |
+          GITCOMMIT=$(cd .coredns-build && git describe --dirty --always)
+          echo "gitcommit=${GITCOMMIT}" >> "$GITHUB_OUTPUT"
+          VERSION=$(make -s version 2>/dev/null | tail -1)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+      - name: Upload prepared source
+        uses: actions/upload-artifact@v7
+        with:
+          name: coredns-source
+          path: |
+            .coredns-build/
+            !.coredns-build/.git/
+          include-hidden-files: true
+          retention-days: 1
+
+  build:
+    name: build-${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ubuntu-24.04
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {goos: darwin, goarch: amd64}
+          - {goos: darwin, goarch: arm64}
+          - {goos: windows, goarch: amd64}
+          - {goos: linux, goarch: amd64}
+          - {goos: linux, goarch: arm}
+          - {goos: linux, goarch: arm64}
+          - {goos: linux, goarch: mips64le}
+          - {goos: linux, goarch: ppc64le}
+          - {goos: linux, goarch: s390x}
+          - {goos: linux, goarch: mips}
+          - {goos: linux, goarch: riscv64}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+      - name: Download prepared source
+        uses: actions/download-artifact@v4
+        with:
+          name: coredns-source
+          path: .coredns-build
+      - name: Build binary
+        run: |
+          SUFFIX=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            SUFFIX=".exe"
+          fi
+          cd .coredns-build && CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -ldflags="-s -w -X github.com/coredns/coredns/coremain.GitCommit=${{ needs.prepare.outputs.gitcommit }}" \
+            -o ../coredns-docker-${{ matrix.goarch }}${SUFFIX}
+      - name: Upload binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: coredns-docker-*
+          retention-days: 1
+
+  package:
+    name: package
+    runs-on: ubuntu-24.04
+    needs: [prepare, build]
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      NAME: coredns-docker
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+      - uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+          working-directory: .github
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+      - name: Reconstruct build directory
+        run: |
+          mkdir -p build/darwin build/linux build/windows build/deb
+          cp binary-darwin-amd64/coredns-docker-amd64 build/darwin/coredns-docker-amd64
+          cp binary-darwin-arm64/coredns-docker-arm64 build/darwin/coredns-docker-arm64
+          cp binary-windows-amd64/coredns-docker-amd64.exe build/windows/coredns-docker-amd64.exe
+          for arch in amd64 arm arm64 mips64le ppc64le s390x mips riscv64; do
+            cp "binary-linux-${arch}/coredns-docker-${arch}" "build/linux/coredns-docker-${arch}"
+          done
+          chmod +x build/linux/* build/darwin/*
+      - name: Build deb packages
+        run: |
+          bundle exec make "build/deb/${NAME}_${VERSION}_amd64.deb"
+          bundle exec make "build/deb/${NAME}_${VERSION}_arm64.deb"
+        env:
+          BUNDLE_GEMFILE: .github/Gemfile
+      - name: Validate
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lintian net-tools util-linux
+          git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
+          sudo /tmp/bats-core/install.sh /usr/local
+          mkdir -p validation
+          lintian "build/deb/${NAME}_${VERSION}_amd64.deb" || true
+          lintian "build/deb/${NAME}_${VERSION}_arm64.deb" || true
+          dpkg-deb --info "build/deb/${NAME}_${VERSION}_amd64.deb"
+          dpkg-deb --info "build/deb/${NAME}_${VERSION}_arm64.deb"
+          dpkg -c "build/deb/${NAME}_${VERSION}_amd64.deb"
+          dpkg -c "build/deb/${NAME}_${VERSION}_arm64.deb"
+          (cd validation && ar -x "../build/deb/${NAME}_${VERSION}_amd64.deb")
+          (cd validation && ar -x "../build/deb/${NAME}_${VERSION}_arm64.deb")
+          ls -lah build/deb validation
+          sha1sum "build/deb/${NAME}_${VERSION}_amd64.deb"
+          sha1sum "build/deb/${NAME}_${VERSION}_arm64.deb"
+          bats test.bats
       - name: upload packages
         uses: actions/upload-artifact@v7
         with:
