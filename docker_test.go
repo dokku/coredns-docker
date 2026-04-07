@@ -9,6 +9,9 @@ import (
 	"github.com/coredns/coredns/plugin/pkg/fall"
 	"github.com/coredns/coredns/plugin/test"
 	"github.com/miekg/dns"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestDocker(t *testing.T) {
@@ -483,5 +486,71 @@ func TestDockerConnectedNormalTTL(t *testing.T) {
 
 	if err := test.SortAndCheck(w.Msg, tc); err != nil {
 		t.Errorf("error: %v", err)
+	}
+}
+
+func getHistogramSampleCount(obs prometheus.Observer) uint64 {
+	metric := obs.(prometheus.Metric)
+	m := &dto.Metric{}
+	_ = metric.Write(m)
+	return m.GetHistogram().GetSampleCount()
+}
+
+func TestServeDNSRequestDurationMetric(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker."},
+		records: map[string][]net.IP{
+			"web.docker.": {net.ParseIP("172.17.0.2")},
+		},
+		srvs: map[string][]srvRecord{},
+	}
+
+	obs := requestDuration.WithLabelValues("", "A")
+	beforeCount := getHistogramSampleCount(obs)
+
+	m := new(dns.Msg)
+	m.SetQuestion("web.docker.", dns.TypeA)
+	w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+	_, err := d.ServeDNS(context.Background(), w, m)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	afterCount := getHistogramSampleCount(obs)
+	if afterCount != beforeCount+1 {
+		t.Errorf("expected requestDuration sample count to increase by 1, before=%d after=%d", beforeCount, afterCount)
+	}
+}
+
+func TestServeDNSStaleRequestMetric(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: false,
+		zones:     []string{"docker."},
+		records: map[string][]net.IP{
+			"web.docker.": {net.ParseIP("172.17.0.2")},
+		},
+		srvs: map[string][]srvRecord{},
+	}
+
+	beforeCount := testutil.ToFloat64(requestStaleCount.WithLabelValues(""))
+
+	m := new(dns.Msg)
+	m.SetQuestion("web.docker.", dns.TypeA)
+	w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+	_, err := d.ServeDNS(context.Background(), w, m)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	afterCount := testutil.ToFloat64(requestStaleCount.WithLabelValues(""))
+	if afterCount != beforeCount+1 {
+		t.Errorf("expected stale_requests_total to increment by 1, before=%f after=%f", beforeCount, afterCount)
 	}
 }

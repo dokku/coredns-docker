@@ -58,7 +58,11 @@ type srvRecord struct {
 
 // ServeDNS implements the plugin.Handler interface.
 func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
+	start := time.Now()
 	state := request.Request{W: w, Req: r}
+	defer func() {
+		requestDuration.WithLabelValues(metrics.WithServer(ctx), dns.TypeToString[state.QType()]).Observe(time.Since(start).Seconds())
+	}()
 	qname := strings.ToLower(state.Name())
 	qtype := state.QType()
 
@@ -97,6 +101,7 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	ttl := d.ttl
 	if !isConnected && ttl > 5 {
 		ttl = 5
+		requestStaleCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
 	}
 
 	header := dns.RR_Header{
@@ -195,6 +200,7 @@ func (d *Docker) startEventLoop(ctx context.Context) {
 		d.mu.Lock()
 		d.connected = true
 		d.mu.Unlock()
+		connectedGauge.Set(1)
 
 		stopped := false
 		for !stopped {
@@ -208,6 +214,7 @@ func (d *Docker) startEventLoop(ctx context.Context) {
 				d.mu.Lock()
 				d.connected = false
 				d.mu.Unlock()
+				connectedGauge.Set(0)
 				stopped = true
 			case msg := <-msgs:
 				log.Debugf("Docker event: %s %s %s", msg.Type, msg.Action, msg.Actor.ID)
@@ -230,9 +237,11 @@ func (d *Docker) startEventLoop(ctx context.Context) {
 }
 
 func (d *Docker) syncRecords(ctx context.Context) {
+	syncStart := time.Now()
 	containers, err := d.client.ContainerList(ctx, container.ListOptions{})
 	if err != nil {
 		log.Errorf("Failed to list containers: %v", err)
+		syncErrorCount.Inc()
 		return
 	}
 
@@ -250,6 +259,10 @@ func (d *Docker) syncRecords(ctx context.Context) {
 	d.lastSyncTime = time.Now()
 	d.mu.Unlock()
 	lastSyncTimestamp.Set(float64(time.Now().Unix()))
+	syncDuration.Observe(time.Since(syncStart).Seconds())
+	recordsCount.Set(float64(len(newRecords)))
+	srvRecordsCount.Set(float64(len(newSrvs)))
+	containersCount.Set(float64(len(containers)))
 	log.Debugf("Synced %d records and %d SRV records", len(newRecords), len(newSrvs))
 }
 
