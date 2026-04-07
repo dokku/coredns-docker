@@ -47,6 +47,7 @@ type Docker struct {
 	mu           sync.RWMutex
 	records      map[string][]net.IP
 	srvs         map[string][]srvRecord
+	ptrs         map[string][]string // reverse-arpa FQDN -> container FQDNs
 	connected    bool
 	lastSyncTime time.Time
 }
@@ -66,6 +67,55 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	qname := strings.ToLower(state.Name())
 	qtype := state.QType()
 	log.Debugf("Query: qname=%s qtype=%s", qname, dns.TypeToString[qtype])
+
+	// Handle PTR queries (reverse DNS) before zone check.
+	// PTR queries use in-addr.arpa/ip6.arpa zones which are outside our configured zones.
+	if qtype == dns.TypePTR {
+		d.mu.RLock()
+		ptrs, ptrOk := d.ptrs[qname]
+		isConnected := d.connected
+		d.mu.RUnlock()
+
+		if !ptrOk {
+			log.Debugf("No PTR records for %s, passing to next plugin", qname)
+			return plugin.NextOrFailure(d.Name(), d.Next, ctx, w, r)
+		}
+
+		log.Debugf("PTR lookup for %s: %d record(s), connected=%t", qname, len(ptrs), isConnected)
+
+		m := new(dns.Msg)
+		m.SetReply(r)
+		m.Authoritative = true
+		m.Compress = true
+
+		ttl := d.ttl
+		if !isConnected && ttl > 5 {
+			ttl = 5
+			requestStaleCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
+		}
+
+		for _, fqdn := range ptrs {
+			m.Answer = append(m.Answer, &dns.PTR{
+				Hdr: dns.RR_Header{
+					Name:   state.QName(),
+					Rrtype: dns.TypePTR,
+					Class:  dns.ClassINET,
+					Ttl:    ttl,
+				},
+				Ptr: fqdn,
+			})
+		}
+
+		log.Debugf("Response for %s PTR: %d answer(s)", qname, len(m.Answer))
+
+		if err := w.WriteMsg(m); err != nil {
+			log.Errorf("Failed to write message: %v", err)
+			requestFailedCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
+		} else {
+			requestSuccessCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
+		}
+		return dns.RcodeSuccess, nil
+	}
 
 	zone := plugin.Zones(d.zones).Matches(qname)
 	if zone == "" {
@@ -335,7 +385,7 @@ func (d *Docker) syncRecords(ctx context.Context) {
 	}
 	log.Debugf("Found %d running containers", len(containers))
 
-	newRecords, newSrvs := generateRecords(ctx, GenerateRecordsInput{
+	newRecords, newSrvs, newPtrs := generateRecords(ctx, GenerateRecordsInput{
 		Containers:  containers,
 		Zones:       d.zones,
 		Inspector:   d.client,
@@ -346,14 +396,16 @@ func (d *Docker) syncRecords(ctx context.Context) {
 	d.mu.Lock()
 	d.records = newRecords
 	d.srvs = newSrvs
+	d.ptrs = newPtrs
 	d.lastSyncTime = time.Now()
 	d.mu.Unlock()
 	lastSyncTimestamp.Set(float64(time.Now().Unix()))
 	syncDuration.Observe(time.Since(syncStart).Seconds())
 	recordsCount.Set(float64(len(newRecords)))
 	srvRecordsCount.Set(float64(len(newSrvs)))
+	ptrRecordsCount.Set(float64(len(newPtrs)))
 	containersCount.Set(float64(len(containers)))
-	log.Debugf("Synced %d records and %d SRV records", len(newRecords), len(newSrvs))
+	log.Debugf("Synced %d records, %d SRV records, and %d PTR records", len(newRecords), len(newSrvs), len(newPtrs))
 }
 
 // ContainerInspector is an interface for inspecting containers.
@@ -376,9 +428,10 @@ type GenerateRecordsInput struct {
 }
 
 // generateRecords generates the records for the containers.
-func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[string][]net.IP, map[string][]srvRecord) {
+func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[string][]net.IP, map[string][]srvRecord, map[string][]string) {
 	newRecords := make(map[string][]net.IP)
 	newSrvs := make(map[string][]srvRecord)
+	newPtrs := make(map[string][]string)
 
 	for _, c := range input.Containers {
 		inspect, err := input.Inspector.ContainerInspect(ctx, c.ID)
@@ -537,6 +590,11 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 				continue
 			}
 
+			arpa, arpaErr := dns.ReverseAddr(ip.String())
+			if arpaErr != nil {
+				log.Debugf("Container %s has IP %s that cannot be reversed: %v", c.ID, ip.String(), arpaErr)
+			}
+
 			names := []string{baseName}
 			names = append(names, ne.settings.Aliases...)
 			names = append(names, ne.settings.DNSNames...)
@@ -557,6 +615,9 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 						fqdn += "."
 					}
 					newRecords[fqdn] = append(newRecords[fqdn], ip)
+					if arpaErr == nil {
+						newPtrs[arpa] = append(newPtrs[arpa], fqdn)
+					}
 
 					if enableWildcard {
 						wildcardFqdn := "*." + fqdn
@@ -583,5 +644,5 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 		}
 	}
 
-	return newRecords, newSrvs
+	return newRecords, newSrvs, newPtrs
 }

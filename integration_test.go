@@ -89,6 +89,7 @@ func setupIntegrationDocker(t *testing.T, networks []string) (*Docker, *client.C
 		networks:    networks,
 		records:     make(map[string][]net.IP),
 		srvs:        make(map[string][]srvRecord),
+		ptrs:        make(map[string][]string),
 	}
 
 	return d, cli
@@ -594,6 +595,11 @@ func TestIntegrationSyncMetrics(t *testing.T) {
 		t.Errorf("expected srv_records_total >= 1, got %f", srvRecords)
 	}
 
+	ptrRecords := testutil.ToFloat64(ptrRecordsCount)
+	if ptrRecords < 1 {
+		t.Errorf("expected ptr_records_total >= 1, got %f", ptrRecords)
+	}
+
 	containers := testutil.ToFloat64(containersCount)
 	if containers < 1 {
 		t.Errorf("expected containers_total >= 1, got %f", containers)
@@ -800,5 +806,93 @@ func TestIntegrationWildcardExactPrecedence(t *testing.T) {
 	exactA := exactResp.Answer[0].(*dns.A)
 	if !a.A.Equal(exactA.A) {
 		t.Errorf("expected exact match IP %s, got %s (wildcard may have taken precedence)", exactA.A, a.A)
+	}
+}
+
+func TestIntegrationPTRRecord(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	// First, get the container's IP via A record
+	fqdn := name + ".docker."
+	resp, _, err := queryDNS(t, d, fqdn, dns.TypeA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", fqdn, err)
+	}
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected A record for %s, got none", fqdn)
+	}
+
+	a := resp.Answer[0].(*dns.A)
+	ip := a.A.String()
+
+	// Compute the reverse ARPA name
+	arpa, err := dns.ReverseAddr(ip)
+	if err != nil {
+		t.Fatalf("Failed to compute reverse address for %s: %v", ip, err)
+	}
+
+	// Query the PTR record
+	ptrResp, _, err := queryDNS(t, d, arpa, dns.TypePTR)
+	if err != nil {
+		t.Fatalf("ServeDNS error for PTR %s: %v", arpa, err)
+	}
+	if ptrResp == nil || len(ptrResp.Answer) == 0 {
+		t.Fatalf("expected PTR record for %s, got none", arpa)
+	}
+
+	ptr, ok := ptrResp.Answer[0].(*dns.PTR)
+	if !ok {
+		t.Fatalf("expected PTR record, got %T", ptrResp.Answer[0])
+	}
+
+	if ptr.Ptr != fqdn {
+		t.Errorf("expected PTR target %s, got %s", fqdn, ptr.Ptr)
+	}
+}
+
+func TestIntegrationPTRAfterRemoval(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	containerID := createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	// Get the container's IP
+	fqdn := name + ".docker."
+	resp, _, _ := queryDNS(t, d, fqdn, dns.TypeA)
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected A record for %s, got none", fqdn)
+	}
+	a := resp.Answer[0].(*dns.A)
+	arpa, _ := dns.ReverseAddr(a.A.String())
+
+	// Verify PTR exists
+	ptrResp, _, _ := queryDNS(t, d, arpa, dns.TypePTR)
+	if ptrResp == nil || len(ptrResp.Answer) == 0 {
+		t.Fatalf("expected PTR record for %s before removal", arpa)
+	}
+
+	// Remove container and re-sync
+	_ = cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
+	d.syncRecords(ctx)
+
+	// PTR should now pass to next plugin (ErrorHandler returns SERVFAIL)
+	_, rcode, _ := queryDNS(t, d, arpa, dns.TypePTR)
+	if rcode != dns.RcodeServerFailure {
+		t.Errorf("expected SERVFAIL for PTR %s after removal, got rcode %d", arpa, rcode)
 	}
 }

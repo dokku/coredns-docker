@@ -8,6 +8,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/go-connections/nat"
+	"github.com/miekg/dns"
 )
 
 // mockContainerInspector is a mock container inspector for testing
@@ -19,6 +20,14 @@ func (m *mockContainerInspector) ContainerInspect(ctx context.Context, container
 	return m.inspections[containerID], nil
 }
 
+func mustReverseAddr(ip string) string {
+	arpa, err := dns.ReverseAddr(ip)
+	if err != nil {
+		panic(err)
+	}
+	return arpa
+}
+
 func TestGenerateRecords(t *testing.T) {
 	ctx := context.Background()
 
@@ -28,6 +37,7 @@ func TestGenerateRecords(t *testing.T) {
 		expected struct {
 			records map[string][]net.IP
 			srvs    map[string][]srvRecord
+			ptrs    map[string][]string
 		}
 	}{
 		{
@@ -64,11 +74,13 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -106,6 +118,7 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
@@ -113,6 +126,7 @@ func TestGenerateRecords(t *testing.T) {
 					"app.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker.", "www.docker.", "app.docker."}},
 			},
 		},
 		{
@@ -152,12 +166,14 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"myproj_mysvc_1.docker.": {net.ParseIP("172.17.0.3")},
 					"myproj.mysvc.docker.":   {net.ParseIP("172.17.0.3")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.3"): {"myproj_mysvc_1.docker.", "myproj.mysvc.docker."}},
 			},
 		},
 		{
@@ -196,6 +212,7 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
@@ -205,6 +222,7 @@ func TestGenerateRecords(t *testing.T) {
 						{target: "web.docker.", port: 80},
 					},
 				},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -247,6 +265,7 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"db.docker.": {net.ParseIP("172.17.0.3")},
@@ -256,6 +275,7 @@ func TestGenerateRecords(t *testing.T) {
 						{target: "db.docker.", port: 5432},
 					},
 				},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.3"): {"db.docker."}},
 			},
 		},
 		{
@@ -298,6 +318,7 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"app.docker.": {net.ParseIP("172.17.0.4")},
@@ -310,6 +331,7 @@ func TestGenerateRecords(t *testing.T) {
 						{target: "app.docker.", port: 8080},
 					},
 				},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.4"): {"app.docker."}},
 			},
 		},
 		{
@@ -366,11 +388,13 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -409,6 +433,7 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
@@ -418,6 +443,7 @@ func TestGenerateRecords(t *testing.T) {
 						{target: "web.docker.", port: 80},
 					},
 				},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -456,11 +482,13 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -499,11 +527,13 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -546,11 +576,13 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -593,11 +625,13 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -637,6 +671,7 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
@@ -649,6 +684,7 @@ func TestGenerateRecords(t *testing.T) {
 						{target: "web.docker.", port: 65535},
 					},
 				},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -692,6 +728,7 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
@@ -704,6 +741,7 @@ func TestGenerateRecords(t *testing.T) {
 						{target: "web.docker.", port: 65535},
 					},
 				},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -731,9 +769,11 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{},
 				srvs:    map[string][]srvRecord{},
+				ptrs:    map[string][]string{},
 			},
 		},
 		{
@@ -762,9 +802,11 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{},
 				srvs:    map[string][]srvRecord{},
+				ptrs:    map[string][]string{},
 			},
 		},
 		{
@@ -797,11 +839,13 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -836,11 +880,13 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("10.0.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("10.0.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -875,11 +921,13 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2"), net.ParseIP("10.0.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}, mustReverseAddr("10.0.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -913,11 +961,13 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -954,12 +1004,14 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
 					"web.internal.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker.", "web.internal."}},
 			},
 		},
 		{
@@ -998,6 +1050,7 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
@@ -1011,6 +1064,7 @@ func TestGenerateRecords(t *testing.T) {
 						{target: "web.internal.", port: 80},
 					},
 				},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker.", "web.internal."}},
 			},
 		},
 		{
@@ -1049,12 +1103,14 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
 					"myapp.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker.", "myapp.docker."}},
 			},
 		},
 		{
@@ -1093,6 +1149,7 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.":  {net.ParseIP("172.17.0.2")},
@@ -1101,6 +1158,7 @@ func TestGenerateRecords(t *testing.T) {
 					"app3.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker.", "app1.docker.", "app2.docker.", "app3.docker."}},
 			},
 		},
 		{
@@ -1139,6 +1197,7 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.":  {net.ParseIP("172.17.0.2")},
@@ -1147,6 +1206,7 @@ func TestGenerateRecords(t *testing.T) {
 					"app3.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker.", "app1.docker.", "app2.docker.", "app3.docker."}},
 			},
 		},
 		{
@@ -1185,11 +1245,13 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -1228,11 +1290,13 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -1271,12 +1335,14 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
 					"myapp.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker.", "myapp.docker."}},
 			},
 		},
 		{
@@ -1316,6 +1382,7 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
@@ -1329,6 +1396,7 @@ func TestGenerateRecords(t *testing.T) {
 						{target: "myapp.docker.", port: 80},
 					},
 				},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker.", "myapp.docker."}},
 			},
 		},
 		{
@@ -1367,6 +1435,7 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.":     {net.ParseIP("172.17.0.2")},
@@ -1375,6 +1444,7 @@ func TestGenerateRecords(t *testing.T) {
 					"myapp.internal.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker.", "web.internal.", "myapp.docker.", "myapp.internal."}},
 			},
 		},
 		{
@@ -1413,12 +1483,14 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
 					"*.web.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -1457,11 +1529,13 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -1501,6 +1575,7 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
@@ -1514,6 +1589,7 @@ func TestGenerateRecords(t *testing.T) {
 						{target: "web.docker.", port: 80},
 					},
 				},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -1552,12 +1628,14 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
 					"*.web.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
 		{
@@ -1597,6 +1675,7 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.":     {net.ParseIP("172.17.0.2")},
@@ -1605,6 +1684,7 @@ func TestGenerateRecords(t *testing.T) {
 					"*.myapp.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker.", "myapp.docker."}},
 			},
 		},
 		{
@@ -1643,6 +1723,7 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.":     {net.ParseIP("172.17.0.2")},
@@ -1651,6 +1732,7 @@ func TestGenerateRecords(t *testing.T) {
 					"*.web.internal.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker.", "web.internal."}},
 			},
 		},
 		{
@@ -1690,6 +1772,7 @@ func TestGenerateRecords(t *testing.T) {
 			expected: struct {
 				records map[string][]net.IP
 				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
 			}{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
@@ -1698,13 +1781,14 @@ func TestGenerateRecords(t *testing.T) {
 					"*.www.docker.": {net.ParseIP("172.17.0.2")},
 				},
 				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker.", "www.docker."}},
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			records, srvs := generateRecords(ctx, tt.input)
+			records, srvs, ptrs := generateRecords(ctx, tt.input)
 
 			// Check records
 			if len(records) != len(tt.expected.records) {
@@ -1764,6 +1848,37 @@ func TestGenerateRecords(t *testing.T) {
 				for i, expectedSrv := range expectedSrvs {
 					if actualSrvs[i].target != expectedSrv.target || actualSrvs[i].port != expectedSrv.port {
 						t.Errorf("expected SRV %+v for %s at index %d, got %+v", expectedSrv, srvName, i, actualSrvs[i])
+					}
+				}
+			}
+
+			// Check PTR records
+			if len(ptrs) != len(tt.expected.ptrs) {
+				t.Errorf("expected %d PTR records, got %d", len(tt.expected.ptrs), len(ptrs))
+				for arpa := range ptrs {
+					if _, ok := tt.expected.ptrs[arpa]; !ok {
+						t.Errorf("unexpected PTR record: %s", arpa)
+					}
+				}
+				for arpa := range tt.expected.ptrs {
+					if _, ok := ptrs[arpa]; !ok {
+						t.Errorf("missing PTR record: %s", arpa)
+					}
+				}
+			}
+			for arpa, expectedFqdns := range tt.expected.ptrs {
+				actualFqdns, ok := ptrs[arpa]
+				if !ok {
+					t.Errorf("expected PTR record for %s, not found", arpa)
+					continue
+				}
+				if len(actualFqdns) != len(expectedFqdns) {
+					t.Errorf("expected %d FQDNs for %s, got %d", len(expectedFqdns), arpa, len(actualFqdns))
+					continue
+				}
+				for i, expectedFqdn := range expectedFqdns {
+					if actualFqdns[i] != expectedFqdn {
+						t.Errorf("expected FQDN %s for %s at index %d, got %s", expectedFqdn, arpa, i, actualFqdns[i])
 					}
 				}
 			}
