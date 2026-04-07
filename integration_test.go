@@ -424,6 +424,35 @@ func TestIntegrationSOAQuery(t *testing.T) {
 	}
 }
 
+func TestIntegrationNSQuery(t *testing.T) {
+	d, _ := setupIntegrationDocker(t, nil)
+	d.connected = true
+
+	resp, _, err := queryDNS(t, d, "docker.", dns.TypeNS)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if resp.Rcode != dns.RcodeSuccess {
+		t.Errorf("expected NOERROR, got rcode %d", resp.Rcode)
+	}
+	if len(resp.Answer) != 1 {
+		t.Fatalf("expected 1 NS answer, got %d", len(resp.Answer))
+	}
+	ns, ok := resp.Answer[0].(*dns.NS)
+	if !ok {
+		t.Fatalf("expected NS record, got %T", resp.Answer[0])
+	}
+	if ns.Hdr.Name != "docker." {
+		t.Errorf("NS name should be docker., got %s", ns.Hdr.Name)
+	}
+	if ns.Ns != "ns.dns.docker." {
+		t.Errorf("NS target should be ns.dns.docker., got %s", ns.Ns)
+	}
+}
+
 func TestIntegrationMultiZone(t *testing.T) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {

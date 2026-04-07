@@ -89,6 +89,22 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 		return dns.RcodeSuccess, nil
 	}
 
+	// Handle NS query at zone apex
+	if qtype == dns.TypeNS && qname == zone {
+		log.Debugf("NS query at zone apex for %s", zone)
+		m := new(dns.Msg)
+		m.SetReply(r)
+		m.Authoritative = true
+		m.Answer = []dns.RR{d.ns(zone)}
+		if err := w.WriteMsg(m); err != nil {
+			log.Errorf("Failed to write message: %v", err)
+			requestFailedCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
+		} else {
+			requestSuccessCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
+		}
+		return dns.RcodeSuccess, nil
+	}
+
 	d.mu.RLock()
 	ips, ok := d.records[qname]
 	srvs, srvOk := d.srvs[qname]
@@ -203,6 +219,14 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 
 // Name implements the Handler interface.
 func (d *Docker) Name() string { return pluginName }
+
+// ns returns a synthetic NS record for the given zone.
+func (d *Docker) ns(zone string) *dns.NS {
+	return &dns.NS{
+		Hdr: dns.RR_Header{Name: zone, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: d.ttl},
+		Ns:  "ns.dns." + zone,
+	}
+}
 
 // soa returns a synthetic SOA record for the given zone.
 func (d *Docker) soa(zone string) *dns.SOA {

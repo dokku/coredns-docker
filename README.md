@@ -74,6 +74,12 @@ The SOA record uses the following values:
 | Expire | 86400 |
 | Minimum TTL | Same as configured TTL |
 
+### NS Records
+
+The plugin generates a synthetic NS record for each configured zone apex. When queried for NS records at the zone apex (e.g., `dig docker NS`), the plugin returns a single NS record pointing to `ns.dns.<zone>`, consistent with the MNAME field in the SOA record.
+
+NS queries for names other than the zone apex (e.g., `dig web.docker NS`) are not handled by the NS record generator and will return a NODATA response if the name exists.
+
 ## Compilation
 
 To build coredns with this plugin enabled, run the following command in this repository:
@@ -168,6 +174,7 @@ When debug logging is enabled, the plugin logs messages at key decision points t
 | `Lookup results for <name>: A/AAAA records=<n>, SRV records=<n>, connected=<bool>` | Shows the number of matching records found in the internal cache and the Docker connection status. |
 | `No records found for <name>, falling through to next plugin` | No records exist for the name and `fallthrough` is configured, so the query is forwarded to the next plugin. |
 | `SOA query at zone apex for <zone>` | A SOA query was received for the zone apex, and the synthetic SOA record is returned as the answer. |
+| `NS query at zone apex for <zone>` | An NS query was received for the zone apex, and the synthetic NS record is returned as the answer. |
 | `No records found for <name>, returning NXDOMAIN` | No records exist for the name and `fallthrough` is not configured, so an NXDOMAIN response is returned. |
 | `Response for <name> <type>: <n> answer(s)` | The number of DNS answer records included in the response. |
 | `NODATA response for <name> type <type>: name exists but no matching records` | The name exists in the record cache but has no records matching the requested type (e.g., AAAA query for an IPv4-only container). |
@@ -280,6 +287,27 @@ dig docker @127.0.0.1 -p 1053 SOA
 
 ;; ANSWER SECTION:
 docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 1234567890 7200 1800 86400 30
+
+;; Query time: 0 msec
+;; SERVER: 127.0.0.1#1053(127.0.0.1) (UDP)
+```
+
+### NS record
+
+```shell
+dig docker @127.0.0.1 -p 1053 NS
+
+; <<>> DiG 9.18.1-1ubuntu1.2-Ubuntu <<>> docker @127.0.0.1 -p 1053 NS
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 12345
+;; flags: qr aa rd; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 0
+
+;; QUESTION SECTION:
+;docker.  IN NS
+
+;; ANSWER SECTION:
+docker. 30 IN NS ns.dns.docker.
 
 ;; Query time: 0 msec
 ;; SERVER: 127.0.0.1#1053(127.0.0.1) (UDP)

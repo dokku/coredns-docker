@@ -154,6 +154,25 @@ func TestDocker(t *testing.T) {
 			},
 		},
 		{
+			// NS query at zone apex
+			Qname: "docker.",
+			Qtype: dns.TypeNS,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.NS("docker. 30 IN NS ns.dns.docker."),
+			},
+		},
+		{
+			// NS query for non-apex name returns NODATA with SOA in authority
+			Qname:  "web.docker.",
+			Qtype:  dns.TypeNS,
+			Rcode:  dns.RcodeSuccess,
+			Answer: []dns.RR{},
+			Ns: []dns.RR{
+				test.SOA("docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 0 7200 1800 86400 30"),
+			},
+		},
+		{
 			// NODATA: MX query for existing name returns empty answer with SOA in authority
 			Qname:  "web.docker.",
 			Qtype:  dns.TypeMX,
@@ -438,6 +457,24 @@ func TestDockerSOAMultiZone(t *testing.T) {
 			Rcode: dns.RcodeSuccess,
 			Answer: []dns.RR{
 				test.SOA("internal. 30 IN SOA ns.dns.internal. hostmaster.internal. 0 7200 1800 86400 30"),
+			},
+		},
+		{
+			// NS query for first zone
+			Qname: "docker.",
+			Qtype: dns.TypeNS,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.NS("docker. 30 IN NS ns.dns.docker."),
+			},
+		},
+		{
+			// NS query for second zone
+			Qname: "internal.",
+			Qtype: dns.TypeNS,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.NS("internal. 30 IN NS ns.dns.internal."),
 			},
 		},
 		{
@@ -922,6 +959,29 @@ func TestServeDNSDebugLogging(t *testing.T) {
 		output := buf.String()
 		if !strings.Contains(output, "SOA query at zone apex for docker.") {
 			t.Errorf("expected SOA query debug log, got: %s", output)
+		}
+	})
+
+	t.Run("ns_query", func(t *testing.T) {
+		buf := enableDebugLog(t)
+
+		d := &Docker{
+			Next:      test.ErrorHandler(),
+			ttl:       DefaultTTL,
+			connected: true,
+			zones:     []string{"docker."},
+			records:   map[string][]net.IP{},
+			srvs:      map[string][]srvRecord{},
+		}
+
+		m := new(dns.Msg)
+		m.SetQuestion("docker.", dns.TypeNS)
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+		d.ServeDNS(context.Background(), w, m)
+
+		output := buf.String()
+		if !strings.Contains(output, "NS query at zone apex for docker.") {
+			t.Errorf("expected NS query debug log, got: %s", output)
 		}
 	})
 }
