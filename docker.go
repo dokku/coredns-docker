@@ -11,6 +11,7 @@ import (
 
 	"github.com/coredns/coredns/plugin"
 	"github.com/coredns/coredns/plugin/metrics"
+	"github.com/coredns/coredns/plugin/pkg/fall"
 	clog "github.com/coredns/coredns/plugin/pkg/log"
 	"github.com/coredns/coredns/request"
 	"github.com/docker/docker/api/types/container"
@@ -33,6 +34,8 @@ const DefaultTTL = uint32(30)
 // Docker is a plugin that serves records for Docker containers
 type Docker struct {
 	Next plugin.Handler
+
+	Fall fall.F
 
 	ttl         uint32
 	client      *client.Client
@@ -68,7 +71,19 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	d.mu.RUnlock()
 
 	if !ok && !srvOk {
-		return plugin.NextOrFailure(d.Name(), d.Next, ctx, w, r)
+		if d.Fall.Through(qname) {
+			return plugin.NextOrFailure(d.Name(), d.Next, ctx, w, r)
+		}
+
+		m := new(dns.Msg)
+		m.SetReply(r)
+		m.Authoritative = true
+		m.Rcode = dns.RcodeNameError
+		if err := w.WriteMsg(m); err != nil {
+			log.Errorf("Failed to write message: %v", err)
+			requestFailedCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
+		}
+		return dns.RcodeSuccess, nil
 	}
 
 	m := new(dns.Msg)
@@ -124,8 +139,16 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	}
 
 	if !found {
-		// For other types, we don't have records
-		return plugin.NextOrFailure(d.Name(), d.Next, ctx, w, r)
+		if d.Fall.Through(qname) {
+			return plugin.NextOrFailure(d.Name(), d.Next, ctx, w, r)
+		}
+
+		// NODATA: name exists but no records for this query type
+		if err := w.WriteMsg(m); err != nil {
+			log.Errorf("Failed to write message: %v", err)
+			requestFailedCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
+		}
+		return dns.RcodeSuccess, nil
 	}
 
 	if err := w.WriteMsg(m); err != nil {

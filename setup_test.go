@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/coredns/caddy"
+	"github.com/coredns/coredns/plugin/pkg/fall"
 )
 
 func TestParse(t *testing.T) {
@@ -16,6 +17,7 @@ func TestParse(t *testing.T) {
 		expectedPrefix   string
 		expectedBackoff  time.Duration
 		expectedNetworks []string
+		expectedFall     fall.F
 	}{
 		{
 			`docker`,
@@ -25,6 +27,7 @@ func TestParse(t *testing.T) {
 			"com.dokku.coredns-docker",
 			60 * time.Second,
 			nil,
+			fall.F{},
 		},
 		{
 			`docker {
@@ -36,6 +39,7 @@ func TestParse(t *testing.T) {
 			"com.dokku.coredns-docker",
 			60 * time.Second,
 			nil,
+			fall.F{},
 		},
 		{
 			`docker {
@@ -51,6 +55,7 @@ func TestParse(t *testing.T) {
 			"com.example",
 			30 * time.Second,
 			[]string{"bridge", "my-custom-network"},
+			fall.F{},
 		},
 		{
 			`docker {
@@ -63,6 +68,31 @@ func TestParse(t *testing.T) {
 			"",
 			60 * time.Second,
 			nil,
+			fall.F{},
+		},
+		{
+			`docker {
+				fallthrough
+			}`,
+			false,
+			DefaultTTL,
+			"docker.",
+			"com.dokku.coredns-docker",
+			60 * time.Second,
+			nil,
+			fall.Root,
+		},
+		{
+			`docker {
+				fallthrough example.org. test.org.
+			}`,
+			false,
+			DefaultTTL,
+			"docker.",
+			"com.dokku.coredns-docker",
+			60 * time.Second,
+			nil,
+			fall.F{Zones: []string{"example.org.", "test.org."}},
 		},
 		{
 			`docker {
@@ -74,6 +104,7 @@ func TestParse(t *testing.T) {
 			"",
 			0,
 			nil,
+			fall.F{},
 		},
 		{
 			`docker {
@@ -85,6 +116,7 @@ func TestParse(t *testing.T) {
 			"",
 			0,
 			nil,
+			fall.F{},
 		},
 	}
 
@@ -134,6 +166,10 @@ func TestParse(t *testing.T) {
 					t.Errorf("Test %d: expected network %s at index %d, got %s", i, test.expectedNetworks[j], j, d.networks[j])
 				}
 			}
+		}
+
+		if !d.Fall.Equal(test.expectedFall) {
+			t.Errorf("Test %d: expected fall %v, got %v", i, test.expectedFall, d.Fall)
 		}
 	}
 }

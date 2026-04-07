@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/coredns/coredns/plugin/pkg/dnstest"
+	"github.com/coredns/coredns/plugin/pkg/fall"
 	"github.com/coredns/coredns/plugin/test"
 	"github.com/miekg/dns"
 )
@@ -118,7 +119,7 @@ func TestDocker(t *testing.T) {
 		{
 			Qname:  "nonexistent.docker.",
 			Qtype:  dns.TypeA,
-			Rcode:  dns.RcodeServerFailure, // Because Next is ErrorHandler
+			Rcode:  dns.RcodeNameError, // NXDOMAIN: no fallthrough configured
 			Answer: []dns.RR{},
 		},
 	}
@@ -168,6 +169,96 @@ func TestDockerEmptyPrefix(t *testing.T) {
 		Answer: []dns.RR{
 			test.SRV("_http._tcp.web.docker.	30	IN	SRV	10 10 80 web.docker."),
 		},
+	}
+
+	r := tc.Msg()
+	w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+	_, err := d.ServeDNS(context.Background(), w, r)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+
+	if err := test.SortAndCheck(w.Msg, tc); err != nil {
+		t.Errorf("error: %v", err)
+	}
+}
+
+func TestDockerFallthrough(t *testing.T) {
+	d := &Docker{
+		Next: test.ErrorHandler(),
+		ttl:  DefaultTTL,
+		zone: "docker.",
+		Fall: fall.Root,
+		records: map[string][]net.IP{
+			"web.docker.": {net.ParseIP("172.17.0.2")},
+		},
+		srvs: map[string][]srvRecord{},
+	}
+
+	var cases = []test.Case{
+		{
+			// Existing record still resolves normally
+			Qname: "web.docker.",
+			Qtype: dns.TypeA,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.A("web.docker.	30	IN	A	172.17.0.2"),
+			},
+		},
+		{
+			// Nonexistent name falls through to ErrorHandler (SERVFAIL)
+			Qname:  "nonexistent.docker.",
+			Qtype:  dns.TypeA,
+			Rcode:  dns.RcodeServerFailure,
+			Answer: []dns.RR{},
+		},
+	}
+
+	ctx := context.Background()
+
+	for i, tc := range cases {
+		r := tc.Msg()
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+		_, err := d.ServeDNS(ctx, w, r)
+		if err != tc.Error {
+			t.Errorf("Test %d: expected error %v, got %v", i, tc.Error, err)
+			continue
+		}
+
+		if w.Msg == nil {
+			if tc.Rcode != dns.RcodeSuccess || len(tc.Answer) != 0 {
+				t.Errorf("Test %d: nil message", i)
+			}
+			continue
+		}
+
+		if err := test.SortAndCheck(w.Msg, tc); err != nil {
+			t.Errorf("Test %d: %v", i, err)
+		}
+	}
+}
+
+func TestDockerFallthroughZoneSpecific(t *testing.T) {
+	d := &Docker{
+		Next: test.ErrorHandler(),
+		ttl:  DefaultTTL,
+		zone: "docker.",
+		Fall: fall.F{Zones: []string{"other."}},
+		records: map[string][]net.IP{
+			"web.docker.": {net.ParseIP("172.17.0.2")},
+		},
+		srvs: map[string][]srvRecord{},
+	}
+
+	// Nonexistent name in docker. zone does NOT match fallthrough zone "other."
+	// so it should return NXDOMAIN, not fall through
+	tc := test.Case{
+		Qname:  "nonexistent.docker.",
+		Qtype:  dns.TypeA,
+		Rcode:  dns.RcodeNameError,
+		Answer: []dns.RR{},
 	}
 
 	r := tc.Msg()

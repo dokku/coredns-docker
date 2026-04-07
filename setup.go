@@ -100,6 +100,8 @@ func parse(c *caddy.Controller, d *Docker) error {
 					return c.Errf("ttl must be in range [0, 3600]: %d", t)
 				}
 				d.ttl = uint32(t)
+			case "fallthrough":
+				d.Fall.SetZonesFromArgs(c.RemainingArgs())
 			case "zone":
 				if !c.NextArg() {
 					return c.ArgErr()
