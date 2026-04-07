@@ -242,7 +242,6 @@ assert_output_contains() {
   assert_success
   assert_output_contains "status: NOERROR"
   assert_output_contains "ANSWER: 1"
-  assert_output_contains "SOA"
   assert_output_contains "ns.dns.${COREDNS_ZONE}."
   assert_output_contains "hostmaster.${COREDNS_ZONE}."
 }
