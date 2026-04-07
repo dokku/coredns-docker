@@ -65,8 +65,10 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	}()
 	qname := strings.ToLower(state.Name())
 	qtype := state.QType()
+	log.Debugf("Query: qname=%s qtype=%s", qname, dns.TypeToString[qtype])
 
 	if plugin.Zones(d.zones).Matches(qname) == "" {
+		log.Debugf("Query %s not in zones [%s], passing to next plugin", qname, strings.Join(d.zones, ", "))
 		return plugin.NextOrFailure(d.Name(), d.Next, ctx, w, r)
 	}
 
@@ -75,12 +77,15 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	srvs, srvOk := d.srvs[qname]
 	isConnected := d.connected
 	d.mu.RUnlock()
+	log.Debugf("Lookup results for %s: A/AAAA records=%d, SRV records=%d, connected=%t", qname, len(ips), len(srvs), isConnected)
 
 	if !ok && !srvOk {
 		if d.Fall.Through(qname) {
+			log.Debugf("No records found for %s, falling through to next plugin", qname)
 			return plugin.NextOrFailure(d.Name(), d.Next, ctx, w, r)
 		}
 
+		log.Debugf("No records found for %s, returning NXDOMAIN", qname)
 		m := new(dns.Msg)
 		m.SetReply(r)
 		m.Authoritative = true
@@ -140,9 +145,11 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 			}
 		}
 	}
+	log.Debugf("Response for %s %s: %d answer(s)", qname, dns.TypeToString[qtype], len(m.Answer))
 
 	if !found && (qtype == dns.TypeA || qtype == dns.TypeAAAA || qtype == dns.TypeSRV) {
 		// NODATA
+		log.Debugf("NODATA response for %s type %s: name exists but no matching records", qname, dns.TypeToString[qtype])
 		if err := w.WriteMsg(m); err != nil {
 			log.Errorf("Failed to write message: %v", err)
 			requestFailedCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
@@ -152,10 +159,12 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 
 	if !found {
 		if d.Fall.Through(qname) {
+			log.Debugf("No handler for type %s on %s, falling through to next plugin", dns.TypeToString[qtype], qname)
 			return plugin.NextOrFailure(d.Name(), d.Next, ctx, w, r)
 		}
 
 		// NODATA: name exists but no records for this query type
+		log.Debugf("No handler for type %s on %s, returning NODATA", dns.TypeToString[qtype], qname)
 		if err := w.WriteMsg(m); err != nil {
 			log.Errorf("Failed to write message: %v", err)
 			requestFailedCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
@@ -201,6 +210,7 @@ func (d *Docker) startEventLoop(ctx context.Context) {
 		d.connected = true
 		d.mu.Unlock()
 		connectedGauge.Set(1)
+		log.Debugf("Connected to Docker daemon")
 
 		stopped := false
 		for !stopped {
@@ -244,6 +254,7 @@ func (d *Docker) syncRecords(ctx context.Context) {
 		syncErrorCount.Inc()
 		return
 	}
+	log.Debugf("Found %d running containers", len(containers))
 
 	newRecords, newSrvs := generateRecords(ctx, GenerateRecordsInput{
 		Containers:  containers,

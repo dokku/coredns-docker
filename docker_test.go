@@ -1,11 +1,19 @@
 package docker
 
 import (
+	"bytes"
 	"context"
+	golog "log"
 	"net"
+	"os"
+	"strings"
 	"testing"
+	"time"
+
+	clog "github.com/coredns/coredns/plugin/pkg/log"
 
 	"github.com/coredns/coredns/plugin/pkg/dnstest"
+	"github.com/docker/docker/client"
 	"github.com/coredns/coredns/plugin/pkg/fall"
 	"github.com/coredns/coredns/plugin/test"
 	"github.com/miekg/dns"
@@ -553,4 +561,273 @@ func TestServeDNSStaleRequestMetric(t *testing.T) {
 	if afterCount != beforeCount+1 {
 		t.Errorf("expected stale_requests_total to increment by 1, before=%f after=%f", beforeCount, afterCount)
 	}
+}
+
+func enableDebugLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	clog.D.Set()
+	golog.SetOutput(&buf)
+	t.Cleanup(func() {
+		clog.D.Clear()
+		golog.SetOutput(os.Stderr)
+	})
+	return &buf
+}
+
+func TestServeDNSDebugLogging(t *testing.T) {
+	t.Run("query_extraction", func(t *testing.T) {
+		buf := enableDebugLog(t)
+
+		d := &Docker{
+			Next:      test.ErrorHandler(),
+			ttl:       DefaultTTL,
+			connected: true,
+			zones:     []string{"docker."},
+			records: map[string][]net.IP{
+				"web.docker.": {net.ParseIP("172.17.0.2")},
+			},
+			srvs: map[string][]srvRecord{},
+		}
+
+		m := new(dns.Msg)
+		m.SetQuestion("web.docker.", dns.TypeA)
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+		d.ServeDNS(context.Background(), w, m)
+
+		output := buf.String()
+		if !strings.Contains(output, "Query: qname=web.docker. qtype=A") {
+			t.Errorf("expected query extraction debug log, got: %s", output)
+		}
+	})
+
+	t.Run("zone_mismatch", func(t *testing.T) {
+		buf := enableDebugLog(t)
+
+		d := &Docker{
+			Next:      test.ErrorHandler(),
+			ttl:       DefaultTTL,
+			connected: true,
+			zones:     []string{"docker."},
+			records:   map[string][]net.IP{},
+			srvs:      map[string][]srvRecord{},
+		}
+
+		m := new(dns.Msg)
+		m.SetQuestion("web.other.", dns.TypeA)
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+		d.ServeDNS(context.Background(), w, m)
+
+		output := buf.String()
+		if !strings.Contains(output, "not in zones [docker.]") {
+			t.Errorf("expected zone mismatch debug log, got: %s", output)
+		}
+	})
+
+	t.Run("lookup_results", func(t *testing.T) {
+		buf := enableDebugLog(t)
+
+		d := &Docker{
+			Next:      test.ErrorHandler(),
+			ttl:       DefaultTTL,
+			connected: true,
+			zones:     []string{"docker."},
+			records: map[string][]net.IP{
+				"web.docker.": {net.ParseIP("172.17.0.2")},
+			},
+			srvs: map[string][]srvRecord{},
+		}
+
+		m := new(dns.Msg)
+		m.SetQuestion("web.docker.", dns.TypeA)
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+		d.ServeDNS(context.Background(), w, m)
+
+		output := buf.String()
+		if !strings.Contains(output, "Lookup results for web.docker.") {
+			t.Errorf("expected lookup results debug log, got: %s", output)
+		}
+	})
+
+	t.Run("nxdomain", func(t *testing.T) {
+		buf := enableDebugLog(t)
+
+		d := &Docker{
+			Next:      test.ErrorHandler(),
+			ttl:       DefaultTTL,
+			connected: true,
+			zones:     []string{"docker."},
+			records:   map[string][]net.IP{},
+			srvs:      map[string][]srvRecord{},
+		}
+
+		m := new(dns.Msg)
+		m.SetQuestion("nonexistent.docker.", dns.TypeA)
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+		d.ServeDNS(context.Background(), w, m)
+
+		output := buf.String()
+		if !strings.Contains(output, "No records found for nonexistent.docker., returning NXDOMAIN") {
+			t.Errorf("expected NXDOMAIN debug log, got: %s", output)
+		}
+	})
+
+	t.Run("fallthrough_no_records", func(t *testing.T) {
+		buf := enableDebugLog(t)
+
+		d := &Docker{
+			Next:      test.ErrorHandler(),
+			ttl:       DefaultTTL,
+			connected: true,
+			zones:     []string{"docker."},
+			Fall:      fall.Root,
+			records:   map[string][]net.IP{},
+			srvs:      map[string][]srvRecord{},
+		}
+
+		m := new(dns.Msg)
+		m.SetQuestion("nonexistent.docker.", dns.TypeA)
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+		d.ServeDNS(context.Background(), w, m)
+
+		output := buf.String()
+		if !strings.Contains(output, "No records found for nonexistent.docker., falling through to next plugin") {
+			t.Errorf("expected fallthrough debug log, got: %s", output)
+		}
+	})
+
+	t.Run("nodata_wrong_type", func(t *testing.T) {
+		buf := enableDebugLog(t)
+
+		d := &Docker{
+			Next:      test.ErrorHandler(),
+			ttl:       DefaultTTL,
+			connected: true,
+			zones:     []string{"docker."},
+			records: map[string][]net.IP{
+				"web.docker.": {net.ParseIP("172.17.0.2")},
+			},
+			srvs: map[string][]srvRecord{},
+		}
+
+		m := new(dns.Msg)
+		m.SetQuestion("web.docker.", dns.TypeAAAA)
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+		d.ServeDNS(context.Background(), w, m)
+
+		output := buf.String()
+		if !strings.Contains(output, "NODATA response for web.docker. type AAAA") {
+			t.Errorf("expected NODATA debug log, got: %s", output)
+		}
+	})
+
+	t.Run("answer_count", func(t *testing.T) {
+		buf := enableDebugLog(t)
+
+		d := &Docker{
+			Next:      test.ErrorHandler(),
+			ttl:       DefaultTTL,
+			connected: true,
+			zones:     []string{"docker."},
+			records: map[string][]net.IP{
+				"web.docker.": {net.ParseIP("172.17.0.2")},
+			},
+			srvs: map[string][]srvRecord{},
+		}
+
+		m := new(dns.Msg)
+		m.SetQuestion("web.docker.", dns.TypeA)
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+		d.ServeDNS(context.Background(), w, m)
+
+		output := buf.String()
+		if !strings.Contains(output, "Response for web.docker. A: 1 answer(s)") {
+			t.Errorf("expected answer count debug log, got: %s", output)
+		}
+	})
+
+	t.Run("other_type_no_handler", func(t *testing.T) {
+		buf := enableDebugLog(t)
+
+		d := &Docker{
+			Next:      test.ErrorHandler(),
+			ttl:       DefaultTTL,
+			connected: true,
+			zones:     []string{"docker."},
+			records: map[string][]net.IP{
+				"web.docker.": {net.ParseIP("172.17.0.2")},
+			},
+			srvs: map[string][]srvRecord{},
+		}
+
+		m := new(dns.Msg)
+		m.SetQuestion("web.docker.", dns.TypeMX)
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+		d.ServeDNS(context.Background(), w, m)
+
+		output := buf.String()
+		if !strings.Contains(output, "No handler for type MX on web.docker., returning NODATA") {
+			t.Errorf("expected no handler debug log, got: %s", output)
+		}
+	})
+}
+
+func TestReadyDebugLogging(t *testing.T) {
+	t.Run("ready_connected", func(t *testing.T) {
+		buf := enableDebugLog(t)
+
+		d := &Docker{
+			client:    &client.Client{},
+			connected: true,
+		}
+		d.Ready()
+
+		output := buf.String()
+		if !strings.Contains(output, "Ready check: ready (connected to Docker daemon)") {
+			t.Errorf("expected ready connected debug log, got: %s", output)
+		}
+	})
+
+	t.Run("ready_no_client", func(t *testing.T) {
+		buf := enableDebugLog(t)
+
+		d := &Docker{}
+		d.Ready()
+
+		output := buf.String()
+		if !strings.Contains(output, "Ready check: not ready (no Docker client)") {
+			t.Errorf("expected not ready no client debug log, got: %s", output)
+		}
+	})
+
+	t.Run("ready_stale", func(t *testing.T) {
+		buf := enableDebugLog(t)
+
+		d := &Docker{
+			client:       &client.Client{},
+			connected:    false,
+			lastSyncTime: time.Now(),
+		}
+		d.Ready()
+
+		output := buf.String()
+		if !strings.Contains(output, "Ready check: ready (serving stale records") {
+			t.Errorf("expected ready stale debug log, got: %s", output)
+		}
+	})
+
+	t.Run("ready_not_synced", func(t *testing.T) {
+		buf := enableDebugLog(t)
+
+		d := &Docker{
+			client:    &client.Client{},
+			connected: false,
+		}
+		d.Ready()
+
+		output := buf.String()
+		if !strings.Contains(output, "Ready check: not ready (disconnected, no previous sync)") {
+			t.Errorf("expected not ready disconnected debug log, got: %s", output)
+		}
+	})
 }

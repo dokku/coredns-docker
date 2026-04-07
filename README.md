@@ -125,6 +125,55 @@ During stale mode:
 
 Once the Docker daemon becomes reachable again, the plugin automatically reconnects (using exponential backoff), re-syncs all container records, and resumes normal TTL values.
 
+## Debug Logging
+
+To enable debug logging for the docker plugin, add the `debug` directive to your Corefile:
+
+```text
+docker:1053 {
+    debug
+    docker {
+        zone docker.localhost
+    }
+}
+```
+
+When debug logging is enabled, the plugin logs messages at key decision points to help trace DNS query resolution and plugin lifecycle events.
+
+### Query Resolution
+
+| Log Message | Meaning |
+|---|---|
+| `Query: qname=<name> qtype=<type>` | A DNS query was received with the given name and type. |
+| `Query <name> not in zones [<zones>], passing to next plugin` | The query name does not match any configured zone, so the query is forwarded to the next plugin in the chain. |
+| `Lookup results for <name>: A/AAAA records=<n>, SRV records=<n>, connected=<bool>` | Shows the number of matching records found in the internal cache and the Docker connection status. |
+| `No records found for <name>, falling through to next plugin` | No records exist for the name and `fallthrough` is configured, so the query is forwarded to the next plugin. |
+| `No records found for <name>, returning NXDOMAIN` | No records exist for the name and `fallthrough` is not configured, so an NXDOMAIN response is returned. |
+| `Response for <name> <type>: <n> answer(s)` | The number of DNS answer records included in the response. |
+| `NODATA response for <name> type <type>: name exists but no matching records` | The name exists in the record cache but has no records matching the requested type (e.g., AAAA query for an IPv4-only container). |
+| `No handler for type <type> on <name>, falling through to next plugin` | The query type is not A, AAAA, or SRV, and `fallthrough` is configured. |
+| `No handler for type <type> on <name>, returning NODATA` | The query type is not A, AAAA, or SRV, and `fallthrough` is not configured. |
+
+### Plugin Lifecycle
+
+| Log Message | Meaning |
+|---|---|
+| `Configuration: zones=[<zones>], ttl=<n>, label_prefix=<prefix>, networks=[<networks>], max_backoff=<duration>` | Logs the parsed plugin configuration at startup. |
+| `Connected to Docker daemon` | The plugin successfully connected (or reconnected) to the Docker daemon. |
+| `Found <n> running containers` | The number of containers discovered during a record sync. |
+| `Synced <n> records and <n> SRV records` | The number of DNS records generated after a sync. |
+
+### Readiness Checks
+
+| Log Message | Meaning |
+|---|---|
+| `Ready check: ready (connected to Docker daemon)` | The plugin is ready because it has an active Docker connection. |
+| `Ready check: ready (serving stale records, last sync: <timestamp>)` | The plugin is ready because it has previously synced records, even though the Docker daemon is currently disconnected. |
+| `Ready check: not ready (no Docker client)` | The plugin is not ready because no Docker client has been initialized. |
+| `Ready check: not ready (disconnected, no previous sync)` | The plugin is not ready because it is disconnected and has never successfully synced records. |
+
+Debug logging has minimal performance overhead when disabled. When the `debug` directive is not present, all `Debugf` calls return immediately without formatting the log message.
+
 ## Examples
 
 Enable docker with and resolve all containers with `.docker.localhost` as the suffix.
