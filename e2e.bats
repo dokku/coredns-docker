@@ -237,6 +237,40 @@ assert_output_contains() {
   assert_output_contains "status: NXDOMAIN"
 }
 
+@test "[e2e] SOA record: zone apex returns SOA" {
+  run dig +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "${COREDNS_ZONE}" SOA
+  assert_success
+  assert_output_contains "status: NOERROR"
+  assert_output_contains "ANSWER: 1"
+  assert_output_contains "SOA"
+  assert_output_contains "ns.dns.${COREDNS_ZONE}."
+  assert_output_contains "hostmaster.${COREDNS_ZONE}."
+}
+
+@test "[e2e] NXDOMAIN: response includes SOA in authority section" {
+  run dig +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-soa-nonexistent.${COREDNS_ZONE}" A
+  assert_success
+  assert_output_contains "status: NXDOMAIN"
+  assert_output_contains "AUTHORITY: 1"
+  assert_output_contains "SOA"
+}
+
+@test "[e2e] NODATA: response includes SOA in authority section" {
+  docker run -d --name coredns-e2e-nodata-soa --network bridge alpine sleep 3600
+
+  run wait_for_record "coredns-e2e-nodata-soa.${COREDNS_ZONE}" "A"
+  assert_success
+
+  run dig +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-nodata-soa.${COREDNS_ZONE}" AAAA
+  assert_success
+  assert_output_contains "status: NOERROR"
+  assert_output_contains "ANSWER: 0"
+  assert_output_contains "AUTHORITY: 1"
+  assert_output_contains "SOA"
+
+  docker rm -f coredns-e2e-nodata-soa
+}
+
 @test "[e2e] container removal: record is cleared after container is removed" {
   docker run -d --name coredns-e2e-ephemeral --network bridge alpine sleep 3600
 
