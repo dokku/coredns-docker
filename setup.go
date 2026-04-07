@@ -23,6 +23,7 @@ func setup(c *caddy.Controller) error {
 		maxBackoff:  60 * time.Second,
 		records:     make(map[string][]net.IP),
 		srvs:        make(map[string][]srvRecord),
+		ptrs:        make(map[string][]string),
 		ttl:         DefaultTTL,
 		zones:       []string{"docker."},
 	}

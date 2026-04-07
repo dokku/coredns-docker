@@ -46,6 +46,14 @@ func TestDocker(t *testing.T) {
 				{target: "db.docker.", port: 5432},
 			},
 		},
+		ptrs: map[string][]string{
+			"2.0.17.172.in-addr.arpa.":                                                      {"web.docker."},
+			"3.0.17.172.in-addr.arpa.":                                                      {"db.docker."},
+			"1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa.": {"ipv6.docker."},
+			"4.0.17.172.in-addr.arpa.":                                                      {"multi.docker."},
+			"5.0.17.172.in-addr.arpa.":                                                      {"multi.docker."},
+			"6.0.17.172.in-addr.arpa.":                                                      {"myproj.mysvc.docker."},
+		},
 	}
 
 	var cases = []test.Case{
@@ -182,6 +190,24 @@ func TestDocker(t *testing.T) {
 				test.SOA("docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 0 7200 1800 86400 30"),
 			},
 		},
+		{
+			// PTR record for IPv4
+			Qname: "2.0.17.172.in-addr.arpa.",
+			Qtype: dns.TypePTR,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.PTR("2.0.17.172.in-addr.arpa. 30 IN PTR web.docker."),
+			},
+		},
+		{
+			// PTR record for IPv6
+			Qname: "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa.",
+			Qtype: dns.TypePTR,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.PTR("1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa. 30 IN PTR ipv6.docker."),
+			},
+		},
 	}
 
 	ctx := context.Background()
@@ -209,6 +235,102 @@ func TestDocker(t *testing.T) {
 	}
 }
 
+func TestDockerPTR(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker."},
+		records: map[string][]net.IP{
+			"web.docker.": {net.ParseIP("172.17.0.2")},
+			"app.docker.": {net.ParseIP("172.17.0.2")},
+		},
+		srvs: map[string][]srvRecord{},
+		ptrs: map[string][]string{
+			"2.0.17.172.in-addr.arpa.": {"web.docker.", "app.docker."},
+		},
+	}
+
+	var cases = []test.Case{
+		{
+			// PTR with multiple FQDNs (sorted alphabetically for SortAndCheck)
+			Qname: "2.0.17.172.in-addr.arpa.",
+			Qtype: dns.TypePTR,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.PTR("2.0.17.172.in-addr.arpa. 30 IN PTR app.docker."),
+				test.PTR("2.0.17.172.in-addr.arpa. 30 IN PTR web.docker."),
+			},
+		},
+		{
+			// Unknown reverse IP passes to next plugin (SERVFAIL from ErrorHandler)
+			Qname:  "9.9.9.9.in-addr.arpa.",
+			Qtype:  dns.TypePTR,
+			Rcode:  dns.RcodeServerFailure,
+			Answer: []dns.RR{},
+		},
+	}
+
+	ctx := context.Background()
+
+	for i, tc := range cases {
+		r := tc.Msg()
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+		_, err := d.ServeDNS(ctx, w, r)
+		if err != tc.Error {
+			t.Errorf("Test %d (%s): expected error %v, got %v", i, tc.Qname, tc.Error, err)
+			continue
+		}
+
+		if w.Msg == nil {
+			if tc.Rcode != dns.RcodeSuccess || len(tc.Answer) != 0 {
+				t.Errorf("Test %d (%s): nil message", i, tc.Qname)
+			}
+			continue
+		}
+
+		if err := test.SortAndCheck(w.Msg, tc); err != nil {
+			t.Errorf("Test %d (%s): %v", i, tc.Qname, err)
+		}
+	}
+}
+
+func TestDockerPTRStaleTTL(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: false,
+		zones:     []string{"docker."},
+		records:   map[string][]net.IP{},
+		srvs:      map[string][]srvRecord{},
+		ptrs: map[string][]string{
+			"2.0.17.172.in-addr.arpa.": {"web.docker."},
+		},
+	}
+
+	tc := test.Case{
+		Qname: "2.0.17.172.in-addr.arpa.",
+		Qtype: dns.TypePTR,
+		Rcode: dns.RcodeSuccess,
+		Answer: []dns.RR{
+			test.PTR("2.0.17.172.in-addr.arpa. 5 IN PTR web.docker."),
+		},
+	}
+
+	r := tc.Msg()
+	w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+	_, err := d.ServeDNS(context.Background(), w, r)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+
+	if err := test.SortAndCheck(w.Msg, tc); err != nil {
+		t.Errorf("error: %v", err)
+	}
+}
+
 func TestDockerEmptyPrefix(t *testing.T) {
 	d := &Docker{
 		Next:        test.ErrorHandler(),
@@ -221,6 +343,7 @@ func TestDockerEmptyPrefix(t *testing.T) {
 				{target: "web.docker.", port: 80},
 			},
 		},
+		ptrs: map[string][]string{},
 	}
 
 	tc := test.Case{
@@ -264,6 +387,7 @@ func TestDockerWildcard(t *testing.T) {
 				{target: "web.docker.", port: 80},
 			},
 		},
+		ptrs: map[string][]string{},
 	}
 
 	var cases = []test.Case{
@@ -362,6 +486,7 @@ func TestDockerFallthrough(t *testing.T) {
 			"web.docker.": {net.ParseIP("172.17.0.2")},
 		},
 		srvs: map[string][]srvRecord{},
+		ptrs: map[string][]string{},
 	}
 
 	var cases = []test.Case{
@@ -419,6 +544,7 @@ func TestDockerFallthroughZoneSpecific(t *testing.T) {
 			"web.docker.": {net.ParseIP("172.17.0.2")},
 		},
 		srvs: map[string][]srvRecord{},
+		ptrs: map[string][]string{},
 	}
 
 	// Nonexistent name in docker. zone does NOT match fallthrough zone "other."
@@ -464,6 +590,7 @@ func TestDockerMultiZone(t *testing.T) {
 				{target: "web.internal.", port: 80},
 			},
 		},
+		ptrs: map[string][]string{},
 	}
 
 	var cases = []test.Case{
@@ -544,6 +671,7 @@ func TestDockerSOAMultiZone(t *testing.T) {
 			"web.internal.": {net.ParseIP("172.17.0.2")},
 		},
 		srvs: map[string][]srvRecord{},
+		ptrs: map[string][]string{},
 	}
 
 	var cases = []test.Case{
@@ -664,6 +792,7 @@ func TestDockerStaleTTL(t *testing.T) {
 				{target: "web.docker.", port: 80},
 			},
 		},
+		ptrs: map[string][]string{},
 	}
 
 	var cases = []test.Case{
@@ -713,6 +842,7 @@ func TestDockerStaleTTLLowTTL(t *testing.T) {
 			"web.docker.": {net.ParseIP("172.17.0.2")},
 		},
 		srvs: map[string][]srvRecord{},
+		ptrs: map[string][]string{},
 	}
 
 	tc := test.Case{
@@ -747,6 +877,7 @@ func TestDockerConnectedNormalTTL(t *testing.T) {
 			"web.docker.": {net.ParseIP("172.17.0.2")},
 		},
 		srvs: map[string][]srvRecord{},
+		ptrs: map[string][]string{},
 	}
 
 	tc := test.Case{
@@ -788,6 +919,7 @@ func TestServeDNSRequestDurationMetric(t *testing.T) {
 			"web.docker.": {net.ParseIP("172.17.0.2")},
 		},
 		srvs: map[string][]srvRecord{},
+		ptrs: map[string][]string{},
 	}
 
 	obs := requestDuration.WithLabelValues("", "A")
@@ -818,6 +950,7 @@ func TestServeDNSStaleRequestMetric(t *testing.T) {
 			"web.docker.": {net.ParseIP("172.17.0.2")},
 		},
 		srvs: map[string][]srvRecord{},
+		ptrs: map[string][]string{},
 	}
 
 	beforeCount := testutil.ToFloat64(requestStaleCount.WithLabelValues(""))
@@ -862,6 +995,7 @@ func TestServeDNSDebugLogging(t *testing.T) {
 				"web.docker.": {net.ParseIP("172.17.0.2")},
 			},
 			srvs: map[string][]srvRecord{},
+			ptrs: map[string][]string{},
 		}
 
 		m := new(dns.Msg)
@@ -885,6 +1019,7 @@ func TestServeDNSDebugLogging(t *testing.T) {
 			zones:     []string{"docker."},
 			records:   map[string][]net.IP{},
 			srvs:      map[string][]srvRecord{},
+			ptrs:      map[string][]string{},
 		}
 
 		m := new(dns.Msg)
@@ -910,6 +1045,7 @@ func TestServeDNSDebugLogging(t *testing.T) {
 				"web.docker.": {net.ParseIP("172.17.0.2")},
 			},
 			srvs: map[string][]srvRecord{},
+			ptrs: map[string][]string{},
 		}
 
 		m := new(dns.Msg)
@@ -933,6 +1069,7 @@ func TestServeDNSDebugLogging(t *testing.T) {
 			zones:     []string{"docker."},
 			records:   map[string][]net.IP{},
 			srvs:      map[string][]srvRecord{},
+			ptrs:      map[string][]string{},
 		}
 
 		m := new(dns.Msg)
@@ -957,6 +1094,7 @@ func TestServeDNSDebugLogging(t *testing.T) {
 			Fall:      fall.Root,
 			records:   map[string][]net.IP{},
 			srvs:      map[string][]srvRecord{},
+			ptrs:      map[string][]string{},
 		}
 
 		m := new(dns.Msg)
@@ -982,6 +1120,7 @@ func TestServeDNSDebugLogging(t *testing.T) {
 				"web.docker.": {net.ParseIP("172.17.0.2")},
 			},
 			srvs: map[string][]srvRecord{},
+			ptrs: map[string][]string{},
 		}
 
 		m := new(dns.Msg)
@@ -1007,6 +1146,7 @@ func TestServeDNSDebugLogging(t *testing.T) {
 				"web.docker.": {net.ParseIP("172.17.0.2")},
 			},
 			srvs: map[string][]srvRecord{},
+			ptrs: map[string][]string{},
 		}
 
 		m := new(dns.Msg)
@@ -1032,6 +1172,7 @@ func TestServeDNSDebugLogging(t *testing.T) {
 				"web.docker.": {net.ParseIP("172.17.0.2")},
 			},
 			srvs: map[string][]srvRecord{},
+			ptrs: map[string][]string{},
 		}
 
 		m := new(dns.Msg)
@@ -1057,6 +1198,7 @@ func TestServeDNSDebugLogging(t *testing.T) {
 				"*.web.docker.": {net.ParseIP("172.17.0.2")},
 			},
 			srvs: map[string][]srvRecord{},
+			ptrs: map[string][]string{},
 		}
 
 		m := new(dns.Msg)
@@ -1080,6 +1222,7 @@ func TestServeDNSDebugLogging(t *testing.T) {
 			zones:     []string{"docker."},
 			records:   map[string][]net.IP{},
 			srvs:      map[string][]srvRecord{},
+			ptrs:      map[string][]string{},
 		}
 
 		m := new(dns.Msg)
@@ -1103,6 +1246,7 @@ func TestServeDNSDebugLogging(t *testing.T) {
 			zones:     []string{"docker."},
 			records:   map[string][]net.IP{},
 			srvs:      map[string][]srvRecord{},
+			ptrs:      map[string][]string{},
 		}
 
 		m := new(dns.Msg)
@@ -1113,6 +1257,56 @@ func TestServeDNSDebugLogging(t *testing.T) {
 		output := buf.String()
 		if !strings.Contains(output, "NS query at zone apex for docker.") {
 			t.Errorf("expected NS query debug log, got: %s", output)
+		}
+	})
+
+	t.Run("ptr_query", func(t *testing.T) {
+		buf := enableDebugLog(t)
+
+		d := &Docker{
+			Next:      test.ErrorHandler(),
+			ttl:       DefaultTTL,
+			connected: true,
+			zones:     []string{"docker."},
+			records:   map[string][]net.IP{},
+			srvs:      map[string][]srvRecord{},
+			ptrs: map[string][]string{
+				"2.0.17.172.in-addr.arpa.": {"web.docker."},
+			},
+		}
+
+		m := new(dns.Msg)
+		m.SetQuestion("2.0.17.172.in-addr.arpa.", dns.TypePTR)
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+		d.ServeDNS(context.Background(), w, m)
+
+		output := buf.String()
+		if !strings.Contains(output, "PTR lookup for 2.0.17.172.in-addr.arpa.") {
+			t.Errorf("expected PTR lookup debug log, got: %s", output)
+		}
+	})
+
+	t.Run("ptr_not_found", func(t *testing.T) {
+		buf := enableDebugLog(t)
+
+		d := &Docker{
+			Next:      test.ErrorHandler(),
+			ttl:       DefaultTTL,
+			connected: true,
+			zones:     []string{"docker."},
+			records:   map[string][]net.IP{},
+			srvs:      map[string][]srvRecord{},
+			ptrs:      map[string][]string{},
+		}
+
+		m := new(dns.Msg)
+		m.SetQuestion("9.9.9.9.in-addr.arpa.", dns.TypePTR)
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+		d.ServeDNS(context.Background(), w, m)
+
+		output := buf.String()
+		if !strings.Contains(output, "No PTR records for 9.9.9.9.in-addr.arpa.") {
+			t.Errorf("expected no PTR records debug log, got: %s", output)
 		}
 	})
 }

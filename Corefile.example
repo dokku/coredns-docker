@@ -1,4 +1,4 @@
-docker:1053 {
+docker:1053 in-addr.arpa:1053 ip6.arpa:1053 {
     ready {
         monitor continuously
     }

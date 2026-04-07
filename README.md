@@ -8,7 +8,7 @@
 
 The docker plugin serves DNS records for containers running on the local Docker daemon. It follows the Docker event stream, picking up changes whenever something happens to a container - whether it gets created, started, deleted, or restarted.
 
-The plugin resolves container names, network aliases, DNS names, and SRV records to their respective container IP addresses within a specified network.
+The plugin resolves container names, network aliases, DNS names, SRV records, and PTR (reverse DNS) records to their respective container IP addresses within a specified network.
 
 ### SRV Records via Docker Labels
 
@@ -174,6 +174,38 @@ The plugin generates a synthetic NS record for each configured zone apex. When q
 
 NS queries for names other than the zone apex (e.g., `dig web.docker NS`) are not handled by the NS record generator and will return a NODATA response if the name exists.
 
+### Reverse DNS (PTR Records)
+
+The plugin automatically generates PTR (reverse DNS) records for all container IP addresses. This allows reverse lookups from IP addresses back to container FQDNs, which is useful for log analysis, connection identification, and authentication schemes.
+
+**How it works:**
+
+- For every A/AAAA record generated, a corresponding PTR record is created mapping the reverse ARPA name to the container's FQDN.
+- IPv4 addresses use the `in-addr.arpa.` zone (e.g., `172.17.0.2` becomes `2.0.17.172.in-addr.arpa.`).
+- IPv6 addresses use the `ip6.arpa.` zone in nibble format (e.g., `2001:db8::1` becomes `1.0.0.0...8.b.d.0.1.0.0.2.ip6.arpa.`).
+- If multiple containers share the same IP, or a container has multiple names, all FQDNs are returned in the PTR response.
+- Wildcard names (e.g., `*.web.docker.`) are excluded from PTR records.
+
+**Server block configuration:**
+
+Since PTR queries use `in-addr.arpa.` and `ip6.arpa.` zones (which are outside your configured zones), you must add these reverse zones to your CoreDNS server block declaration:
+
+```text
+docker.localhost:1053 in-addr.arpa:1053 ip6.arpa:1053 {
+    docker {
+        zone docker.localhost
+    }
+}
+```
+
+When a PTR query does not match any known container IP, it is passed to the next plugin in the chain.
+
+**Example:**
+
+```bash
+dig -x 172.17.0.2 @127.0.0.1 -p 1053
+```
+
 ## Compilation
 
 To build coredns with this plugin enabled, run the following command in this repository:
@@ -220,6 +252,7 @@ If monitoring is enabled (via the *prometheus* directive) the following metrics 
 - `coredns_docker_last_sync_timestamp_seconds` - Unix timestamp of the last successful record sync from Docker. This can be used to monitor how fresh the plugin's data is.
 - `coredns_docker_records_total` - Number of A/AAAA DNS record names currently tracked.
 - `coredns_docker_srv_records_total` - Number of SRV DNS record names currently tracked.
+- `coredns_docker_ptr_records_total` - Number of PTR DNS record names currently tracked.
 - `coredns_docker_connected` - Whether the plugin is connected to the Docker daemon (1 = connected, 0 = disconnected).
 - `coredns_docker_containers_total` - Number of Docker containers currently tracked.
 - `coredns_docker_sync_duration_seconds` - Histogram of record sync durations in seconds.
@@ -237,7 +270,7 @@ When the Docker daemon becomes unreachable, the plugin continues serving the las
 
 During stale mode:
 
-- All previously synced A, AAAA, and SRV records continue to be served.
+- All previously synced A, AAAA, SRV, and PTR records continue to be served.
 - The TTL on stale responses is reduced to 5 seconds (or the configured TTL if it is already 5 seconds or lower). This encourages DNS clients to re-query frequently, so they pick up fresh records as soon as the daemon reconnects.
 - The `coredns_docker_last_sync_timestamp_seconds` metric can be used to monitor how long the plugin has been operating on stale data.
 - The plugin remains "ready" as long as it has previously synced at least once, even if the daemon is currently disconnected.
@@ -249,7 +282,7 @@ Once the Docker daemon becomes reachable again, the plugin automatically reconne
 To enable debug logging for the docker plugin, add the `debug` directive to your Corefile:
 
 ```text
-docker:1053 {
+docker:1053 in-addr.arpa:1053 ip6.arpa:1053 {
     debug
     docker {
         zone docker.localhost
@@ -267,6 +300,8 @@ When debug logging is enabled, the plugin logs messages at key decision points t
 | `Query <name> not in zones [<zones>], passing to next plugin` | The query name does not match any configured zone, so the query is forwarded to the next plugin in the chain. |
 | `Lookup results for <name>: A/AAAA records=<n>, SRV records=<n>, connected=<bool>` | Shows the number of matching records found in the internal cache and the Docker connection status. |
 | `Wildcard match for <name> via <wildcard>` | No exact match was found, but a wildcard record matched. The query name's leftmost label was replaced with `*` to find the match. |
+| `PTR lookup for <name>: <n> record(s), connected=<bool>` | A PTR (reverse DNS) query matched a known container IP. Shows the number of FQDNs and connection status. |
+| `No PTR records for <name>, passing to next plugin` | A PTR query did not match any known container IP, so the query is forwarded to the next plugin. |
 | `No records found for <name>, falling through to next plugin` | No records exist for the name and `fallthrough` is configured, so the query is forwarded to the next plugin. |
 | `SOA query at zone apex for <zone>` | A SOA query was received for the zone apex, and the synthetic SOA record is returned as the answer. |
 | `NS query at zone apex for <zone>` | An NS query was received for the zone apex, and the synthetic NS record is returned as the answer. |
@@ -283,7 +318,7 @@ When debug logging is enabled, the plugin logs messages at key decision points t
 | `Configuration: zones=[<zones>], ttl=<n>, label_prefix=<prefix>, networks=[<networks>], max_backoff=<duration>` | Logs the parsed plugin configuration at startup. |
 | `Connected to Docker daemon` | The plugin successfully connected (or reconnected) to the Docker daemon. |
 | `Found <n> running containers` | The number of containers discovered during a record sync. |
-| `Synced <n> records and <n> SRV records` | The number of DNS records generated after a sync. |
+| `Synced <n> records, <n> SRV records, and <n> PTR records` | The number of DNS records generated after a sync. |
 
 ### Readiness Checks
 
@@ -298,10 +333,10 @@ Debug logging has minimal performance overhead when disabled. When the `debug` d
 
 ## Examples
 
-Enable docker with and resolve all containers with `.docker.localhost` as the suffix.
+Enable docker with and resolve all containers with `.docker.localhost` as the suffix. The `in-addr.arpa` and `ip6.arpa` zones enable reverse DNS (PTR) lookups.
 
 ```text
-docker:1053 {
+docker:1053 in-addr.arpa:1053 ip6.arpa:1053 {
     docker {
         zone docker.localhost
     }
@@ -312,7 +347,7 @@ docker:1053 {
 Enable docker with multiple zones. Containers will be resolvable under both `.docker.localhost` and `.internal.localhost`. Note that all zones must also be listed in the server block declaration.
 
 ```text
-docker.localhost:1053 internal.localhost:1053 {
+docker.localhost:1053 internal.localhost:1053 in-addr.arpa:1053 ip6.arpa:1053 {
     docker {
         zone docker.localhost internal.localhost
     }
@@ -403,6 +438,27 @@ dig docker @127.0.0.1 -p 1053 NS
 
 ;; ANSWER SECTION:
 docker. 30 IN NS ns.dns.docker.
+
+;; Query time: 0 msec
+;; SERVER: 127.0.0.1#1053(127.0.0.1) (UDP)
+```
+
+### PTR record (reverse DNS)
+
+```shell
+dig -x 172.17.0.2 @127.0.0.1 -p 1053
+
+; <<>> DiG 9.18.1-1ubuntu1.2-Ubuntu <<>> -x 172.17.0.2 @127.0.0.1 -p 1053
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 54321
+;; flags: qr aa rd; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 0
+
+;; QUESTION SECTION:
+;2.0.17.172.in-addr.arpa.  IN PTR
+
+;; ANSWER SECTION:
+2.0.17.172.in-addr.arpa. 30 IN PTR web.docker.
 
 ;; Query time: 0 msec
 ;; SERVER: 127.0.0.1#1053(127.0.0.1) (UDP)

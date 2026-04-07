@@ -19,7 +19,7 @@ setup_file() {
   COREFILE="$(mktemp /tmp/Corefile.e2e.XXXXXX)"
   export COREFILE
   cat >"$COREFILE" <<EOF
-${COREDNS_ZONE}:${COREDNS_PORT} {
+${COREDNS_ZONE}:${COREDNS_PORT} in-addr.arpa:${COREDNS_PORT} ip6.arpa:${COREDNS_PORT} {
     log
     errors
     debug
@@ -118,6 +118,24 @@ wait_for_record_on_port() {
     i=$((i + 1))
   done
   echo "Record $name ($type) not found on port $port after waiting" >&2
+  return 1
+}
+
+wait_for_ptr_record() {
+  local ip="$1"
+  local retries=20
+  local i=0
+  while [ "$i" -lt "$retries" ]; do
+    local result
+    result=$(dig +short +time=1 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" -x "$ip" 2>/dev/null)
+    if [ -n "$result" ]; then
+      echo "$result"
+      return 0
+    fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+  echo "PTR record for $ip not found after waiting" >&2
   return 1
 }
 
@@ -517,4 +535,38 @@ EOF
   kill "$MULTI_PID" 2>/dev/null || true
   wait "$MULTI_PID" 2>/dev/null || true
   rm -f "$MULTI_COREFILE"
+}
+
+@test "[e2e] PTR record: reverse DNS for container IP resolves" {
+  docker run -d --name coredns-e2e-ptr --network bridge alpine sleep 3600
+
+  run wait_for_record "coredns-e2e-ptr.${COREDNS_ZONE}"
+  assert_success
+  local container_ip="$output"
+
+  run wait_for_ptr_record "$container_ip"
+  assert_success
+  assert_output_contains "coredns-e2e-ptr.${COREDNS_ZONE}."
+
+  docker rm -f coredns-e2e-ptr
+}
+
+@test "[e2e] PTR record: reverse DNS cleared after container removal" {
+  docker run -d --name coredns-e2e-ptr-rm --network bridge alpine sleep 3600
+
+  run wait_for_record "coredns-e2e-ptr-rm.${COREDNS_ZONE}"
+  assert_success
+  local container_ip="$output"
+
+  run wait_for_ptr_record "$container_ip"
+  assert_success
+
+  docker rm -f coredns-e2e-ptr-rm
+
+  run wait_for_record_gone "coredns-e2e-ptr-rm.${COREDNS_ZONE}"
+  assert_success
+
+  # PTR should also be gone
+  run dig +short +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" -x "$container_ip"
+  [[ -z "$output" ]]
 }
