@@ -413,6 +413,58 @@ assert_output_contains() {
   docker rm -f coredns-e2e-ttl
 }
 
+@test "[e2e] wildcard: arbitrary subdomain resolves" {
+  docker run -d --name coredns-e2e-wildcard --network bridge \
+    --label "com.dokku.coredns-docker/wildcard=true" \
+    alpine sleep 3600
+
+  # Wait for the base record first
+  run wait_for_record "coredns-e2e-wildcard.${COREDNS_ZONE}"
+  assert_success
+  local container_ip="$output"
+
+  # Wildcard subdomain should resolve to same IP
+  run wait_for_record "anything.coredns-e2e-wildcard.${COREDNS_ZONE}"
+  assert_success
+  assert_equal "$container_ip" "$output"
+
+  docker rm -f coredns-e2e-wildcard
+}
+
+@test "[e2e] wildcard: exact match takes precedence" {
+  docker run -d --name coredns-e2e-wildcard-exact --network bridge \
+    --label "com.dokku.coredns-docker/wildcard=true" \
+    alpine sleep 3600
+
+  run wait_for_record "coredns-e2e-wildcard-exact.${COREDNS_ZONE}"
+  assert_success
+
+  # The exact container name record should resolve (not via wildcard)
+  run dig +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-wildcard-exact.${COREDNS_ZONE}" A
+  assert_success
+  assert_output_contains "status: NOERROR"
+  assert_output_contains "ANSWER: 1"
+
+  docker rm -f coredns-e2e-wildcard-exact
+}
+
+@test "[e2e] wildcard: deep subdomain does not match (RFC 4592)" {
+  docker run -d --name coredns-e2e-wildcard-deep --network bridge \
+    --label "com.dokku.coredns-docker/wildcard=true" \
+    alpine sleep 3600
+
+  run wait_for_record "coredns-e2e-wildcard-deep.${COREDNS_ZONE}"
+  assert_success
+
+  # Deep subdomain should NOT match the wildcard
+  run dig +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" \
+    "deep.sub.coredns-e2e-wildcard-deep.${COREDNS_ZONE}" A
+  assert_success
+  assert_output_contains "status: NXDOMAIN"
+
+  docker rm -f coredns-e2e-wildcard-deep
+}
+
 @test "[e2e] multi-zone: container resolves under multiple zones" {
   local MULTI_COREFILE
   MULTI_COREFILE="$(mktemp /tmp/Corefile.multizone.XXXXXX)"

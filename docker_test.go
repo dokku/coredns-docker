@@ -245,6 +245,112 @@ func TestDockerEmptyPrefix(t *testing.T) {
 	}
 }
 
+func TestDockerWildcard(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker."},
+		records: map[string][]net.IP{
+			"web.docker.":   {net.ParseIP("172.17.0.2")},
+			"*.web.docker.": {net.ParseIP("172.17.0.2")},
+			"db.docker.":    {net.ParseIP("172.17.0.3")},
+		},
+		srvs: map[string][]srvRecord{
+			"_http._tcp.web.docker.": {
+				{target: "web.docker.", port: 80},
+			},
+			"_http._tcp.*.web.docker.": {
+				{target: "web.docker.", port: 80},
+			},
+		},
+	}
+
+	var cases = []test.Case{
+		{
+			// Wildcard A match: anything.web.docker. matches *.web.docker.
+			Qname: "anything.web.docker.",
+			Qtype: dns.TypeA,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.A("anything.web.docker.	30	IN	A	172.17.0.2"),
+			},
+		},
+		{
+			// Exact match takes precedence over wildcard
+			Qname: "web.docker.",
+			Qtype: dns.TypeA,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.A("web.docker.	30	IN	A	172.17.0.2"),
+			},
+		},
+		{
+			// Deep subdomain does NOT match wildcard per RFC 4592
+			Qname:  "deep.sub.web.docker.",
+			Qtype:  dns.TypeA,
+			Rcode:  dns.RcodeNameError,
+			Answer: []dns.RR{},
+			Ns: []dns.RR{
+				test.SOA("docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 0 7200 1800 86400 30"),
+			},
+		},
+		{
+			// Wildcard NODATA: AAAA query for IPv4-only wildcard
+			Qname:  "anything.web.docker.",
+			Qtype:  dns.TypeAAAA,
+			Rcode:  dns.RcodeSuccess,
+			Answer: []dns.RR{},
+			Ns: []dns.RR{
+				test.SOA("docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 0 7200 1800 86400 30"),
+			},
+		},
+		{
+			// Wildcard SRV match
+			Qname: "_http._tcp.anything.web.docker.",
+			Qtype: dns.TypeSRV,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.SRV("_http._tcp.anything.web.docker.	30	IN	SRV	10 10 80 web.docker."),
+			},
+		},
+		{
+			// No wildcard NXDOMAIN: query where no wildcard exists
+			Qname:  "anything.db.docker.",
+			Qtype:  dns.TypeA,
+			Rcode:  dns.RcodeNameError,
+			Answer: []dns.RR{},
+			Ns: []dns.RR{
+				test.SOA("docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 0 7200 1800 86400 30"),
+			},
+		},
+	}
+
+	ctx := context.Background()
+
+	for i, tc := range cases {
+		r := tc.Msg()
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+		_, err := d.ServeDNS(ctx, w, r)
+		if err != tc.Error {
+			t.Errorf("Test %d (%s): expected no error, got %v", i, tc.Qname, err)
+			continue
+		}
+
+		if w.Msg == nil {
+			if tc.Rcode != dns.RcodeSuccess || len(tc.Answer) != 0 {
+				t.Errorf("Test %d (%s): nil message", i, tc.Qname)
+			}
+			continue
+		}
+
+		if err := test.SortAndCheck(w.Msg, tc); err != nil {
+			t.Errorf("Test %d (%s): %v", i, tc.Qname, err)
+		}
+	}
+}
+
 func TestDockerFallthrough(t *testing.T) {
 	d := &Docker{
 		Next:      test.ErrorHandler(),
@@ -936,6 +1042,31 @@ func TestServeDNSDebugLogging(t *testing.T) {
 		output := buf.String()
 		if !strings.Contains(output, "No handler for type MX on web.docker., returning NODATA") {
 			t.Errorf("expected no handler debug log, got: %s", output)
+		}
+	})
+
+	t.Run("wildcard_match", func(t *testing.T) {
+		buf := enableDebugLog(t)
+
+		d := &Docker{
+			Next:      test.ErrorHandler(),
+			ttl:       DefaultTTL,
+			connected: true,
+			zones:     []string{"docker."},
+			records: map[string][]net.IP{
+				"*.web.docker.": {net.ParseIP("172.17.0.2")},
+			},
+			srvs: map[string][]srvRecord{},
+		}
+
+		m := new(dns.Msg)
+		m.SetQuestion("foo.web.docker.", dns.TypeA)
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+		d.ServeDNS(context.Background(), w, m)
+
+		output := buf.String()
+		if !strings.Contains(output, "Wildcard match for foo.web.docker. via *.web.docker.") {
+			t.Errorf("expected wildcard match debug log, got: %s", output)
 		}
 	})
 
