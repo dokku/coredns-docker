@@ -55,6 +55,25 @@ If no labels with the specified prefix are found, the plugin falls back to using
 - For a port mapping like `80/tcp`, it generates an SRV record for `_tcp._tcp.container-name.zone`.
 - For a port mapping without a protocol like `80`, it generates SRV records for both `_tcp._tcp` and `_udp._udp`.
 
+### SOA Records
+
+The plugin generates a synthetic SOA record for each configured zone. SOA records serve two purposes:
+
+1. **Zone apex queries**: Querying for the SOA record of a configured zone (e.g., `dig docker SOA`) returns the synthetic SOA as the answer.
+2. **Negative responses**: NXDOMAIN (name does not exist) and NODATA (name exists but not for the requested type) responses include the SOA record in the authority section. This is required by [RFC 2308](https://www.rfc-editor.org/rfc/rfc2308) and allows DNS caches to properly cache negative responses.
+
+The SOA record uses the following values:
+
+| Field | Value |
+|---|---|
+| MNAME (primary nameserver) | `ns.dns.<zone>` |
+| RNAME (hostmaster) | `hostmaster.<zone>` |
+| Serial | Current Unix timestamp |
+| Refresh | 7200 |
+| Retry | 1800 |
+| Expire | 86400 |
+| Minimum TTL | Same as configured TTL |
+
 ## Compilation
 
 To build coredns with this plugin enabled, run the following command in this repository:
@@ -148,6 +167,7 @@ When debug logging is enabled, the plugin logs messages at key decision points t
 | `Query <name> not in zones [<zones>], passing to next plugin` | The query name does not match any configured zone, so the query is forwarded to the next plugin in the chain. |
 | `Lookup results for <name>: A/AAAA records=<n>, SRV records=<n>, connected=<bool>` | Shows the number of matching records found in the internal cache and the Docker connection status. |
 | `No records found for <name>, falling through to next plugin` | No records exist for the name and `fallthrough` is configured, so the query is forwarded to the next plugin. |
+| `SOA query at zone apex for <zone>` | A SOA query was received for the zone apex, and the synthetic SOA record is returned as the answer. |
 | `No records found for <name>, returning NXDOMAIN` | No records exist for the name and `fallthrough` is not configured, so an NXDOMAIN response is returned. |
 | `Response for <name> <type>: <n> answer(s)` | The number of DNS answer records included in the response. |
 | `NODATA response for <name> type <type>: name exists but no matching records` | The name exists in the record cache but has no records matching the requested type (e.g., AAAA query for an IPv4-only container). |
@@ -239,6 +259,27 @@ dig _http._tcp.web.docker @127.0.0.1 -p 1053 SRV
 
 ;; ANSWER SECTION:
 _http._tcp.web.docker. 30 IN SRV 10 10 80 web.docker.
+
+;; Query time: 0 msec
+;; SERVER: 127.0.0.1#1053(127.0.0.1) (UDP)
+```
+
+### SOA record
+
+```shell
+dig docker @127.0.0.1 -p 1053 SOA
+
+; <<>> DiG 9.18.1-1ubuntu1.2-Ubuntu <<>> docker @127.0.0.1 -p 1053 SOA
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 12345
+;; flags: qr aa rd; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 0
+
+;; QUESTION SECTION:
+;docker.  IN SOA
+
+;; ANSWER SECTION:
+docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 1234567890 7200 1800 86400 30
 
 ;; Query time: 0 msec
 ;; SERVER: 127.0.0.1#1053(127.0.0.1) (UDP)

@@ -380,6 +380,48 @@ func TestIntegrationNoFallthrough(t *testing.T) {
 	if resp.Rcode != dns.RcodeNameError {
 		t.Errorf("expected NXDOMAIN for nonexistent without fallthrough, got rcode %d", resp.Rcode)
 	}
+	if len(resp.Ns) != 1 {
+		t.Fatalf("expected 1 SOA in authority section, got %d", len(resp.Ns))
+	}
+	soa, ok := resp.Ns[0].(*dns.SOA)
+	if !ok {
+		t.Fatalf("expected SOA record in authority, got %T", resp.Ns[0])
+	}
+	if soa.Hdr.Name != "docker." {
+		t.Errorf("SOA name should be docker., got %s", soa.Hdr.Name)
+	}
+}
+
+func TestIntegrationSOAQuery(t *testing.T) {
+	d, _ := setupIntegrationDocker(t, nil)
+	d.connected = true
+
+	resp, _, err := queryDNS(t, d, "docker.", dns.TypeSOA)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if resp.Rcode != dns.RcodeSuccess {
+		t.Errorf("expected NOERROR, got rcode %d", resp.Rcode)
+	}
+	if len(resp.Answer) != 1 {
+		t.Fatalf("expected 1 SOA answer, got %d", len(resp.Answer))
+	}
+	soa, ok := resp.Answer[0].(*dns.SOA)
+	if !ok {
+		t.Fatalf("expected SOA record, got %T", resp.Answer[0])
+	}
+	if soa.Hdr.Name != "docker." {
+		t.Errorf("SOA name should be docker., got %s", soa.Hdr.Name)
+	}
+	if soa.Ns != "ns.dns.docker." {
+		t.Errorf("SOA MNAME should be ns.dns.docker., got %s", soa.Ns)
+	}
+	if soa.Mbox != "hostmaster.docker." {
+		t.Errorf("SOA RNAME should be hostmaster.docker., got %s", soa.Mbox)
+	}
 }
 
 func TestIntegrationMultiZone(t *testing.T) {

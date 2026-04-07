@@ -67,9 +67,26 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	qtype := state.QType()
 	log.Debugf("Query: qname=%s qtype=%s", qname, dns.TypeToString[qtype])
 
-	if plugin.Zones(d.zones).Matches(qname) == "" {
+	zone := plugin.Zones(d.zones).Matches(qname)
+	if zone == "" {
 		log.Debugf("Query %s not in zones [%s], passing to next plugin", qname, strings.Join(d.zones, ", "))
 		return plugin.NextOrFailure(d.Name(), d.Next, ctx, w, r)
+	}
+
+	// Handle SOA query at zone apex
+	if qtype == dns.TypeSOA && qname == zone {
+		log.Debugf("SOA query at zone apex for %s", zone)
+		m := new(dns.Msg)
+		m.SetReply(r)
+		m.Authoritative = true
+		m.Answer = []dns.RR{d.soa(zone)}
+		if err := w.WriteMsg(m); err != nil {
+			log.Errorf("Failed to write message: %v", err)
+			requestFailedCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
+		} else {
+			requestSuccessCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
+		}
+		return dns.RcodeSuccess, nil
 	}
 
 	d.mu.RLock()
@@ -90,6 +107,7 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 		m.SetReply(r)
 		m.Authoritative = true
 		m.Rcode = dns.RcodeNameError
+		m.Ns = []dns.RR{d.soa(zone)}
 		if err := w.WriteMsg(m); err != nil {
 			log.Errorf("Failed to write message: %v", err)
 			requestFailedCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
@@ -150,6 +168,7 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	if !found && (qtype == dns.TypeA || qtype == dns.TypeAAAA || qtype == dns.TypeSRV) {
 		// NODATA
 		log.Debugf("NODATA response for %s type %s: name exists but no matching records", qname, dns.TypeToString[qtype])
+		m.Ns = []dns.RR{d.soa(zone)}
 		if err := w.WriteMsg(m); err != nil {
 			log.Errorf("Failed to write message: %v", err)
 			requestFailedCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
@@ -165,6 +184,7 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 
 		// NODATA: name exists but no records for this query type
 		log.Debugf("No handler for type %s on %s, returning NODATA", dns.TypeToString[qtype], qname)
+		m.Ns = []dns.RR{d.soa(zone)}
 		if err := w.WriteMsg(m); err != nil {
 			log.Errorf("Failed to write message: %v", err)
 			requestFailedCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
@@ -183,6 +203,20 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 
 // Name implements the Handler interface.
 func (d *Docker) Name() string { return pluginName }
+
+// soa returns a synthetic SOA record for the given zone.
+func (d *Docker) soa(zone string) *dns.SOA {
+	return &dns.SOA{
+		Hdr:     dns.RR_Header{Name: zone, Rrtype: dns.TypeSOA, Class: dns.ClassINET, Ttl: d.ttl},
+		Ns:      "ns.dns." + zone,
+		Mbox:    "hostmaster." + zone,
+		Serial:  uint32(time.Now().Unix()),
+		Refresh: 7200,
+		Retry:   1800,
+		Expire:  86400,
+		Minttl:  d.ttl,
+	}
+}
 
 func (d *Docker) startEventLoop(ctx context.Context) {
 	log.Infof("Starting Docker event loop")

@@ -115,24 +115,53 @@ func TestDocker(t *testing.T) {
 			},
 		},
 		{
-			// NODATA: AAAA query for IPv4-only container returns empty answer
+			// NODATA: AAAA query for IPv4-only container returns empty answer with SOA in authority
 			Qname:  "web.docker.",
 			Qtype:  dns.TypeAAAA,
 			Rcode:  dns.RcodeSuccess,
 			Answer: []dns.RR{},
+			Ns: []dns.RR{
+				test.SOA("docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 0 7200 1800 86400 30"),
+			},
 		},
 		{
-			// NODATA: A query for IPv6-only container returns empty answer
+			// NODATA: A query for IPv6-only container returns empty answer with SOA in authority
 			Qname:  "ipv6.docker.",
 			Qtype:  dns.TypeA,
 			Rcode:  dns.RcodeSuccess,
 			Answer: []dns.RR{},
+			Ns: []dns.RR{
+				test.SOA("docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 0 7200 1800 86400 30"),
+			},
 		},
 		{
+			// NXDOMAIN with SOA in authority
 			Qname:  "nonexistent.docker.",
 			Qtype:  dns.TypeA,
-			Rcode:  dns.RcodeNameError, // NXDOMAIN: no fallthrough configured
+			Rcode:  dns.RcodeNameError,
 			Answer: []dns.RR{},
+			Ns: []dns.RR{
+				test.SOA("docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 0 7200 1800 86400 30"),
+			},
+		},
+		{
+			// SOA query at zone apex
+			Qname: "docker.",
+			Qtype: dns.TypeSOA,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.SOA("docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 0 7200 1800 86400 30"),
+			},
+		},
+		{
+			// NODATA: MX query for existing name returns empty answer with SOA in authority
+			Qname:  "web.docker.",
+			Qtype:  dns.TypeMX,
+			Rcode:  dns.RcodeSuccess,
+			Answer: []dns.RR{},
+			Ns: []dns.RR{
+				test.SOA("docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 0 7200 1800 86400 30"),
+			},
 		},
 	}
 
@@ -274,6 +303,9 @@ func TestDockerFallthroughZoneSpecific(t *testing.T) {
 		Qtype:  dns.TypeA,
 		Rcode:  dns.RcodeNameError,
 		Answer: []dns.RR{},
+		Ns: []dns.RR{
+			test.SOA("docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 0 7200 1800 86400 30"),
+		},
 	}
 
 	r := tc.Msg()
@@ -348,6 +380,105 @@ func TestDockerMultiZone(t *testing.T) {
 			Qtype:  dns.TypeA,
 			Rcode:  dns.RcodeServerFailure,
 			Answer: []dns.RR{},
+		},
+	}
+
+	ctx := context.Background()
+
+	for i, tc := range cases {
+		r := tc.Msg()
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+		_, err := d.ServeDNS(ctx, w, r)
+		if err != tc.Error {
+			t.Errorf("Test %d: expected error %v, got %v", i, tc.Error, err)
+			continue
+		}
+
+		if w.Msg == nil {
+			if tc.Rcode != dns.RcodeSuccess || len(tc.Answer) != 0 {
+				t.Errorf("Test %d: nil message", i)
+			}
+			continue
+		}
+
+		if err := test.SortAndCheck(w.Msg, tc); err != nil {
+			t.Errorf("Test %d: %v", i, err)
+		}
+	}
+}
+
+func TestDockerSOAMultiZone(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker.", "internal."},
+		records: map[string][]net.IP{
+			"web.docker.":   {net.ParseIP("172.17.0.2")},
+			"web.internal.": {net.ParseIP("172.17.0.2")},
+		},
+		srvs: map[string][]srvRecord{},
+	}
+
+	var cases = []test.Case{
+		{
+			// SOA query for first zone
+			Qname: "docker.",
+			Qtype: dns.TypeSOA,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.SOA("docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 0 7200 1800 86400 30"),
+			},
+		},
+		{
+			// SOA query for second zone
+			Qname: "internal.",
+			Qtype: dns.TypeSOA,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.SOA("internal. 30 IN SOA ns.dns.internal. hostmaster.internal. 0 7200 1800 86400 30"),
+			},
+		},
+		{
+			// NXDOMAIN in docker. zone has SOA for docker.
+			Qname:  "nonexistent.docker.",
+			Qtype:  dns.TypeA,
+			Rcode:  dns.RcodeNameError,
+			Answer: []dns.RR{},
+			Ns: []dns.RR{
+				test.SOA("docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 0 7200 1800 86400 30"),
+			},
+		},
+		{
+			// NXDOMAIN in internal. zone has SOA for internal.
+			Qname:  "nonexistent.internal.",
+			Qtype:  dns.TypeA,
+			Rcode:  dns.RcodeNameError,
+			Answer: []dns.RR{},
+			Ns: []dns.RR{
+				test.SOA("internal. 30 IN SOA ns.dns.internal. hostmaster.internal. 0 7200 1800 86400 30"),
+			},
+		},
+		{
+			// NODATA in docker. zone has SOA for docker.
+			Qname:  "web.docker.",
+			Qtype:  dns.TypeAAAA,
+			Rcode:  dns.RcodeSuccess,
+			Answer: []dns.RR{},
+			Ns: []dns.RR{
+				test.SOA("docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 0 7200 1800 86400 30"),
+			},
+		},
+		{
+			// NODATA in internal. zone has SOA for internal.
+			Qname:  "web.internal.",
+			Qtype:  dns.TypeAAAA,
+			Rcode:  dns.RcodeSuccess,
+			Answer: []dns.RR{},
+			Ns: []dns.RR{
+				test.SOA("internal. 30 IN SOA ns.dns.internal. hostmaster.internal. 0 7200 1800 86400 30"),
+			},
 		},
 	}
 
@@ -768,6 +899,29 @@ func TestServeDNSDebugLogging(t *testing.T) {
 		output := buf.String()
 		if !strings.Contains(output, "No handler for type MX on web.docker., returning NODATA") {
 			t.Errorf("expected no handler debug log, got: %s", output)
+		}
+	})
+
+	t.Run("soa_query", func(t *testing.T) {
+		buf := enableDebugLog(t)
+
+		d := &Docker{
+			Next:      test.ErrorHandler(),
+			ttl:       DefaultTTL,
+			connected: true,
+			zones:     []string{"docker."},
+			records:   map[string][]net.IP{},
+			srvs:      map[string][]srvRecord{},
+		}
+
+		m := new(dns.Msg)
+		m.SetQuestion("docker.", dns.TypeSOA)
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+		d.ServeDNS(context.Background(), w, m)
+
+		output := buf.String()
+		if !strings.Contains(output, "SOA query at zone apex for docker.") {
+			t.Errorf("expected SOA query debug log, got: %s", output)
 		}
 	})
 }
