@@ -203,7 +203,7 @@ This creates TXT records:
 
 - Multiple TXT labels on the same container accumulate: each contributes one TXT RR.
 - The keyed segment is lowercased when building the FQDN; `txt.Info=...` and `txt.info=...` produce the same record.
-- An empty label value is valid (e.g. `txt.empty=` yields `"" ` — RFC 1035 permits empty character-strings).
+- An empty label value is valid (e.g. `txt.empty=` yields an empty character-string — RFC 1035 permits empty TXT values).
 - TXT values longer than 255 bytes are automatically split into multiple 255-byte `character-string`s on the wire by the DNS library; no manual chunking is required.
 - A bare `txt.` label (trailing dot, no key) is ignored.
 
