@@ -1,0 +1,28 @@
+# Host mode example: resolve names to host port bindings instead of container IPs.
+# Useful when CoreDNS runs outside Docker (macOS, dev hosts) and you need names
+# that point at addresses reachable from the host.
+#
+# Start CoreDNS:
+#   coredns-docker -conf Corefile
+# Start the demo container:
+#   docker compose up -d
+#
+# Verify the A record points at the host-bound IP (127.0.0.1), not the container IP:
+#   dig @127.0.0.1 -p 1053 web.docker +short
+#   # → 127.0.0.1
+#
+# And the SRV record reports the host port (18080), not the container port (80):
+#   dig @127.0.0.1 -p 1053 _tcp._tcp.web.docker SRV +short
+#   # → 10 10 18080 web.docker.
+#
+# Then hit the service via the resolved name + host port:
+#   curl -I http://web.docker:18080
+
+name: host-mode-example
+
+services:
+  web:
+    image: nginx:alpine
+    container_name: host-mode-web
+    ports:
+      - "127.0.0.1:18080:80"

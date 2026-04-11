@@ -1,0 +1,23 @@
+# Wildcard example: one container answers for any single-label subdomain.
+#
+# Start CoreDNS:
+#   coredns-docker -conf Corefile
+# Start the demo container:
+#   docker compose up -d
+#
+# Verify (all three return the same IP):
+#   dig @127.0.0.1 -p 1053 web.docker +short           # exact match
+#   dig @127.0.0.1 -p 1053 tenant1.web.docker +short   # wildcard match
+#   dig @127.0.0.1 -p 1053 anything.web.docker +short  # wildcard match
+#
+# Wildcards match exactly one label per RFC 4592:
+#   dig @127.0.0.1 -p 1053 foo.bar.web.docker +short   # NXDOMAIN — two labels
+
+name: wildcard-example
+
+services:
+  web:
+    image: nginx:alpine
+    container_name: wildcard-web
+    labels:
+      com.dokku.coredns-docker/wildcard: "true"

@@ -1,0 +1,31 @@
+# TXT records example: attach metadata, SPF, and ACME challenge TXT records via labels.
+#
+# Start CoreDNS:
+#   coredns-docker -conf Corefile
+# Start the demo container:
+#   docker compose up -d
+#
+# Verify each TXT record:
+#   dig @127.0.0.1 -p 1053 web.docker TXT +short
+#   # → "v=spf1 -all"
+#
+#   dig @127.0.0.1 -p 1053 info.web.docker TXT +short
+#   # → "version=1.0.0"
+#
+#   dig @127.0.0.1 -p 1053 _acme-challenge.web.docker TXT +short
+#   # → "deadbeef"
+#
+#   dig @127.0.0.1 -p 1053 multi.web.docker TXT +short
+#   # → "hello" "world"
+
+name: txt-example
+
+services:
+  web:
+    image: nginx:alpine
+    container_name: txt-web
+    labels:
+      com.dokku.coredns-docker/txt: "v=spf1 -all"
+      com.dokku.coredns-docker/txt.info: "version=1.0.0"
+      com.dokku.coredns-docker/txt._acme-challenge: "deadbeef"
+      com.dokku.coredns-docker/txt.multi: "\"hello\" \"world\""

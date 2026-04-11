@@ -1,0 +1,20 @@
+# Multiple zones example: serve the same containers under two suffixes.
+#
+# Both the server block and the plugin block must list every zone. Once both
+# sides agree, every container is resolvable under each zone independently.
+#
+# Start CoreDNS:
+#   coredns-docker -conf Corefile
+# Start the demo container:
+#   docker compose up -d
+#
+# Verify (same IP returned from both zones):
+#   dig @127.0.0.1 -p 1053 web.docker +short
+#   dig @127.0.0.1 -p 1053 web.internal +short
+
+name: multi-zone-example
+
+services:
+  web:
+    image: nginx:alpine
+    container_name: multi-zone-web

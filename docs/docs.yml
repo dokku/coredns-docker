@@ -1,0 +1,11 @@
+docs:
+  - getting-started.md
+  - installation.md
+  - dns-basics.md
+  - configuration.md
+  - docker-labels.md
+  - metrics.md
+  - testing.md
+  - linux-systemd.md
+  - macos-resolver.md
+  - examples/README.md

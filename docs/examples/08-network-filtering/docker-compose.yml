@@ -1,0 +1,33 @@
+# Network filtering example: ignore containers on networks not in the allowlist.
+#
+# The Corefile has `networks netfilter-allowed`, so only containers attached to
+# the "netfilter-allowed" Docker network are served. The "hidden" container lives
+# on a second network that the plugin does not watch and therefore gets no records.
+#
+# Start CoreDNS:
+#   coredns-docker -conf Corefile
+# Start the demo containers:
+#   docker compose up -d
+#
+# Verify:
+#   dig @127.0.0.1 -p 1053 visible.docker +short   # answered (on netfilter-allowed)
+#   dig @127.0.0.1 -p 1053 hidden.docker +short    # NXDOMAIN (on netfilter-ignored)
+
+name: netfilter-example
+
+networks:
+  netfilter-allowed:
+  netfilter-ignored:
+
+services:
+  visible:
+    image: nginx:alpine
+    container_name: visible
+    networks:
+      - netfilter-allowed
+
+  hidden:
+    image: nginx:alpine
+    container_name: hidden
+    networks:
+      - netfilter-ignored

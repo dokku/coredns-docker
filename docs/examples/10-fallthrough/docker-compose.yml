@@ -1,0 +1,25 @@
+# Fallthrough example: serve docker.* from the plugin, forward everything else upstream.
+#
+# The Corefile catches all zones with `.:1053`, tries the docker plugin first,
+# and falls through to `forward . 1.1.1.1` for anything the plugin did not match.
+#
+# Start CoreDNS:
+#   coredns-docker -conf Corefile
+# Start the demo container:
+#   docker compose up -d
+#
+# Verify the container name is answered by the plugin:
+#   dig @127.0.0.1 -p 1053 web.docker +short
+#
+# Verify an unrelated name is forwarded upstream through the cache:
+#   dig @127.0.0.1 -p 1053 example.com +short
+#
+# Without `fallthrough` in the docker block, the second query would return
+# NXDOMAIN because the plugin owns every query that hits the `.` server block.
+
+name: fallthrough-example
+
+services:
+  web:
+    image: nginx:alpine
+    container_name: fallthrough-web
