@@ -475,6 +475,142 @@ func TestDockerWildcard(t *testing.T) {
 	}
 }
 
+func TestDockerCNAME(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker."},
+		records: map[string][]net.IP{
+			"other.docker.": {net.ParseIP("172.17.0.3")},
+		},
+		srvs: map[string][]srvRecord{},
+		ptrs: map[string][]string{},
+		cnames: map[string]string{
+			"web.docker.":     "external.example.com.",
+			"alias.docker.":   "external.example.com.",
+			"*.wild.docker.":  "external.example.com.",
+		},
+	}
+
+	var cases = []test.Case{
+		{
+			// CNAME type query returns the CNAME record.
+			Qname: "web.docker.",
+			Qtype: dns.TypeCNAME,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.CNAME("web.docker.	30	IN	CNAME	external.example.com."),
+			},
+		},
+		{
+			// A query on a CNAME name returns the CNAME; resolver chases it.
+			Qname: "web.docker.",
+			Qtype: dns.TypeA,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.CNAME("web.docker.	30	IN	CNAME	external.example.com."),
+			},
+		},
+		{
+			// AAAA query on a CNAME name also returns the CNAME.
+			Qname: "web.docker.",
+			Qtype: dns.TypeAAAA,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.CNAME("web.docker.	30	IN	CNAME	external.example.com."),
+			},
+		},
+		{
+			// Alias name also resolves to the same CNAME target.
+			Qname: "alias.docker.",
+			Qtype: dns.TypeA,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.CNAME("alias.docker.	30	IN	CNAME	external.example.com."),
+			},
+		},
+		{
+			// Wildcard CNAME match.
+			Qname: "anything.wild.docker.",
+			Qtype: dns.TypeA,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.CNAME("anything.wild.docker.	30	IN	CNAME	external.example.com."),
+			},
+		},
+		{
+			// Non-cname name is unaffected.
+			Qname: "other.docker.",
+			Qtype: dns.TypeA,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.A("other.docker.	30	IN	A	172.17.0.3"),
+			},
+		},
+	}
+
+	ctx := context.Background()
+
+	for i, tc := range cases {
+		r := tc.Msg()
+		w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+		_, err := d.ServeDNS(ctx, w, r)
+		if err != tc.Error {
+			t.Errorf("Test %d (%s): expected no error, got %v", i, tc.Qname, err)
+			continue
+		}
+
+		if w.Msg == nil {
+			if tc.Rcode != dns.RcodeSuccess || len(tc.Answer) != 0 {
+				t.Errorf("Test %d (%s): nil message", i, tc.Qname)
+			}
+			continue
+		}
+
+		if err := test.SortAndCheck(w.Msg, tc); err != nil {
+			t.Errorf("Test %d (%s): %v", i, tc.Qname, err)
+		}
+	}
+}
+
+func TestDockerCNAMEStaleTTL(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: false,
+		zones:     []string{"docker."},
+		records:   map[string][]net.IP{},
+		srvs:      map[string][]srvRecord{},
+		ptrs:      map[string][]string{},
+		cnames: map[string]string{
+			"web.docker.": "external.example.com.",
+		},
+	}
+
+	tc := test.Case{
+		Qname: "web.docker.",
+		Qtype: dns.TypeCNAME,
+		Rcode: dns.RcodeSuccess,
+		Answer: []dns.RR{
+			test.CNAME("web.docker.	5	IN	CNAME	external.example.com."),
+		},
+	}
+
+	r := tc.Msg()
+	w := dnstest.NewRecorder(&test.ResponseWriter{})
+
+	_, err := d.ServeDNS(context.Background(), w, r)
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+
+	if err := test.SortAndCheck(w.Msg, tc); err != nil {
+		t.Errorf("error: %v", err)
+	}
+}
+
 func TestDockerFallthrough(t *testing.T) {
 	d := &Docker{
 		Next:      test.ErrorHandler(),

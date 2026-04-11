@@ -24,6 +24,7 @@ func setup(c *caddy.Controller) error {
 		records:     make(map[string][]net.IP),
 		srvs:        make(map[string][]srvRecord),
 		ptrs:        make(map[string][]string),
+		cnames:      make(map[string]string),
 		ttl:         DefaultTTL,
 		zones:       []string{"docker."},
 	}

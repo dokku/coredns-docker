@@ -51,6 +51,7 @@ type Docker struct {
 	records      map[string][]net.IP
 	srvs         map[string][]srvRecord
 	ptrs         map[string][]string // reverse-arpa FQDN -> container FQDNs
+	cnames       map[string]string   // FQDN -> canonical target (trailing dot)
 	connected    bool
 	lastSyncTime time.Time
 }
@@ -163,7 +164,8 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	d.mu.RLock()
 	ips, ok := d.records[qname]
 	srvs, srvOk := d.srvs[qname]
-	if !ok && !srvOk {
+	cnameTarget, cnameOk := d.cnames[qname]
+	if !ok && !srvOk && !cnameOk {
 		// Try wildcard: replace the first non-underscore label with *
 		// This handles both plain names (foo.web.docker. → *.web.docker.)
 		// and SRV-prefixed names (_http._tcp.foo.web.docker. → _http._tcp.*.web.docker.)
@@ -179,16 +181,17 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 			wildcardName := strings.Join(wildcardLabels, ".") + "."
 			ips, ok = d.records[wildcardName]
 			srvs, srvOk = d.srvs[wildcardName]
-			if ok || srvOk {
+			cnameTarget, cnameOk = d.cnames[wildcardName]
+			if ok || srvOk || cnameOk {
 				log.Debugf("Wildcard match for %s via %s", qname, wildcardName)
 			}
 		}
 	}
 	isConnected := d.connected
 	d.mu.RUnlock()
-	log.Debugf("Lookup results for %s: A/AAAA records=%d, SRV records=%d, connected=%t", qname, len(ips), len(srvs), isConnected)
+	log.Debugf("Lookup results for %s: A/AAAA records=%d, SRV records=%d, CNAME=%t, connected=%t", qname, len(ips), len(srvs), cnameOk, isConnected)
 
-	if !ok && !srvOk {
+	if !ok && !srvOk && !cnameOk {
 		if d.Fall.Through(qname) {
 			log.Debugf("No records found for %s, falling through to next plugin", qname)
 			requestFallthroughCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
@@ -230,7 +233,22 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	}
 
 	found := false
-	if qtype == dns.TypeSRV {
+	if cnameOk {
+		// A CNAME name has no other record types (RFC 1034). Return the
+		// CNAME for any query type — the resolver will re-query for the
+		// target if it wants A/AAAA. Use a CNAME-typed header so the RR
+		// serializes correctly regardless of the original qtype.
+		m.Answer = append(m.Answer, &dns.CNAME{
+			Hdr: dns.RR_Header{
+				Name:   state.QName(),
+				Rrtype: dns.TypeCNAME,
+				Class:  dns.ClassINET,
+				Ttl:    ttl,
+			},
+			Target: cnameTarget,
+		})
+		found = true
+	} else if qtype == dns.TypeSRV {
 		for _, srv := range srvs {
 			m.Answer = append(m.Answer, &dns.SRV{
 				Hdr:      header,
@@ -398,7 +416,7 @@ func (d *Docker) syncRecords(ctx context.Context) {
 	}
 	log.Debugf("Found %d running containers", len(containers))
 
-	newRecords, newSrvs, newPtrs := generateRecords(ctx, GenerateRecordsInput{
+	newRecords, newSrvs, newPtrs, newCnames := generateRecords(ctx, GenerateRecordsInput{
 		Containers:  containers,
 		Zones:       d.zones,
 		Inspector:   d.client,
@@ -412,6 +430,7 @@ func (d *Docker) syncRecords(ctx context.Context) {
 	d.records = newRecords
 	d.srvs = newSrvs
 	d.ptrs = newPtrs
+	d.cnames = newCnames
 	d.lastSyncTime = time.Now()
 	d.mu.Unlock()
 	lastSyncTimestamp.Set(float64(time.Now().Unix()))
@@ -419,8 +438,9 @@ func (d *Docker) syncRecords(ctx context.Context) {
 	recordsCount.Set(float64(len(newRecords)))
 	srvRecordsCount.Set(float64(len(newSrvs)))
 	ptrRecordsCount.Set(float64(len(newPtrs)))
+	cnameRecordsCount.Set(float64(len(newCnames)))
 	containersCount.Set(float64(len(containers)))
-	log.Debugf("Synced %d records, %d SRV records, and %d PTR records", len(newRecords), len(newSrvs), len(newPtrs))
+	log.Debugf("Synced %d records, %d SRV records, %d PTR records, and %d CNAME records", len(newRecords), len(newSrvs), len(newPtrs), len(newCnames))
 }
 
 // ContainerInspector is an interface for inspecting containers.
@@ -451,10 +471,11 @@ type GenerateRecordsInput struct {
 }
 
 // generateRecords generates the records for the containers.
-func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[string][]net.IP, map[string][]srvRecord, map[string][]string) {
+func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[string][]net.IP, map[string][]srvRecord, map[string][]string, map[string]string) {
 	newRecords := make(map[string][]net.IP)
 	newSrvs := make(map[string][]srvRecord)
 	newPtrs := make(map[string][]string)
+	newCnames := make(map[string]string)
 
 	for _, c := range input.Containers {
 		inspect, err := input.Inspector.ContainerInspect(ctx, c.ID)
@@ -549,10 +570,75 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 		}
 		enableWildcard := inspect.Config.Labels[wildcardLabel] == "true"
 
+		// Parse cname label. If set, the container is fully aliased to the
+		// target: we emit only CNAME records for all of its names, and skip
+		// A/AAAA, SRV, and PTR records (RFC 1034 disallows a CNAME name from
+		// having other record types).
+		cnameLabel := input.LabelPrefix + "/cname"
+		if input.LabelPrefix == "" {
+			cnameLabel = "cname"
+		}
+		var containerCname string
+		if raw, ok := inspect.Config.Labels[cnameLabel]; ok {
+			trimmed := strings.TrimSpace(raw)
+			if trimmed != "" {
+				lower := strings.ToLower(trimmed)
+				if !strings.HasSuffix(lower, ".") {
+					lower += "."
+				}
+				containerCname = lower
+			}
+		}
+
 		// Add SRV records based on labels
 		srvPrefix := input.LabelPrefix + "/srv."
 		if input.LabelPrefix == "" {
 			srvPrefix = "srv."
+		}
+
+		if containerCname != "" {
+			// Union names across all selected networks (same rule as host mode),
+			// because a CNAME has no IP affinity — the destination is the
+			// external name the user asked us to alias to.
+			names := []string{baseName}
+			for _, ne := range networksToProcess {
+				names = append(names, ne.settings.Aliases...)
+				names = append(names, ne.settings.DNSNames...)
+			}
+			if project != "" && service != "" {
+				names = append(names, project+"."+service)
+			}
+			names = append(names, hostnameNames...)
+
+			seen := make(map[string]bool, len(names))
+			uniqueNames := names[:0]
+			for _, name := range names {
+				lower := strings.ToLower(name)
+				if lower == "" || seen[lower] {
+					continue
+				}
+				seen[lower] = true
+				uniqueNames = append(uniqueNames, name)
+			}
+			names = uniqueNames
+
+			for _, name := range names {
+				for _, zone := range input.Zones {
+					fqdn := strings.ToLower(name + "." + zone)
+					if !strings.HasSuffix(fqdn, ".") {
+						fqdn += "."
+					}
+					// CNAME targets are last-write-wins if two containers happen
+					// to claim the same name; same semantics as conflicting A
+					// records today.
+					newCnames[fqdn] = containerCname
+					if enableWildcard {
+						newCnames["*."+fqdn] = containerCname
+					}
+				}
+			}
+
+			continue
 		}
 
 		if input.HostMode {
@@ -904,5 +990,5 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 		}
 	}
 
-	return newRecords, newSrvs, newPtrs
+	return newRecords, newSrvs, newPtrs, newCnames
 }

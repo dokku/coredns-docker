@@ -72,6 +72,13 @@ var (
 		Name:      "ptr_records_total",
 		Help:      "Number of PTR DNS record names currently tracked.",
 	})
+	// cnameRecordsCount is the number of CNAME DNS record names currently tracked.
+	cnameRecordsCount = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: plugin.Namespace,
+		Subsystem: pluginName,
+		Name:      "cname_records_total",
+		Help:      "Number of CNAME DNS record names currently tracked.",
+	})
 	// connectedGauge indicates whether the plugin is connected to the Docker daemon.
 	connectedGauge = promauto.NewGauge(prometheus.GaugeOpts{
 		Namespace: plugin.Namespace,

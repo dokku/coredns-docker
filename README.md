@@ -99,6 +99,62 @@ This will create A records for both custom hostnames in addition to the containe
 
 If SRV labels are also configured, SRV records are generated for all names including custom hostnames.
 
+### CNAME Records via Docker Labels
+
+To alias a container to an external domain, add a label in the format:
+
+```text
+[LABEL_PREFIX]/cname=[TARGET]
+```
+
+Where:
+
+- `LABEL_PREFIX` is the value of the `label_prefix` option (defaults to `com.dokku.coredns-docker`)
+- `TARGET` is the canonical name the container should alias to (e.g., `external.example.com`)
+
+When a container has a `cname` label, the plugin emits a CNAME record for **every** name the container would otherwise receive an A/AAAA record for — container name, network aliases, Docker DNS names, Docker Compose `project.service`, and any names from the `hostname` label. No A, AAAA, SRV, or PTR records are generated for that container. This is mandated by [RFC 1034 §3.6.2](https://www.rfc-editor.org/rfc/rfc1034#section-3.6.2), which disallows a CNAME name from coexisting with other record types.
+
+**Example Docker Compose configuration:**
+
+```yaml
+services:
+  web:
+    image: nginx
+    labels:
+      - "com.dokku.coredns-docker/cname=external.example.com"
+```
+
+**Example Docker run command:**
+
+```bash
+docker run -d \
+  --name web \
+  --label "com.dokku.coredns-docker/cname=external.example.com" \
+  nginx
+```
+
+This will create a CNAME record:
+
+- `web.docker.` → `external.example.com.`
+
+**Target normalization:**
+
+- If the target does not end with a trailing dot, one is appended automatically (`external.example.com` becomes `external.example.com.`).
+- The target is lower-cased at sync time.
+- An empty `cname` label is ignored and the container falls back to normal A/AAAA record generation.
+
+**Query behavior:**
+
+- A `dig CNAME web.docker` query returns the CNAME record directly.
+- A `dig A web.docker` (or `AAAA`) query also returns the CNAME record. DNS resolvers will chase the CNAME to its target on their own; the docker plugin does not resolve the target in-process, even if the target lies inside one of the configured zones.
+- Query types other than `A`, `AAAA`, `CNAME`, and `SRV` return the CNAME in the answer section as well, since RFC 1034 specifies that the CNAME record applies regardless of the query type.
+
+**Wildcard interaction:**
+
+If the `wildcard` label is also set, a wildcard CNAME (`*.name.zone.` → `TARGET`) is generated alongside the exact-match CNAME.
+
+**Use case:** A container proxies traffic to an external service (e.g., a managed database or third-party API), and applications inside your Docker network should resolve the container name to that external host without hard-coding the external domain.
+
 ### Wildcard Records
 
 To enable wildcard DNS resolution for a container, add a label in the format:
@@ -327,6 +383,7 @@ If monitoring is enabled (via the *prometheus* directive) the following metrics 
 - `coredns_docker_records_total` - Number of A/AAAA DNS record names currently tracked.
 - `coredns_docker_srv_records_total` - Number of SRV DNS record names currently tracked.
 - `coredns_docker_ptr_records_total` - Number of PTR DNS record names currently tracked.
+- `coredns_docker_cname_records_total` - Number of CNAME DNS record names currently tracked.
 - `coredns_docker_connected` - Whether the plugin is connected to the Docker daemon (1 = connected, 0 = disconnected).
 - `coredns_docker_containers_total` - Number of Docker containers currently tracked.
 - `coredns_docker_sync_duration_seconds` - Histogram of record sync durations in seconds.
@@ -372,7 +429,7 @@ When debug logging is enabled, the plugin logs messages at key decision points t
 |---|---|
 | `Query: qname=<name> qtype=<type>` | A DNS query was received with the given name and type. |
 | `Query <name> not in zones [<zones>], passing to next plugin` | The query name does not match any configured zone, so the query is forwarded to the next plugin in the chain. |
-| `Lookup results for <name>: A/AAAA records=<n>, SRV records=<n>, connected=<bool>` | Shows the number of matching records found in the internal cache and the Docker connection status. |
+| `Lookup results for <name>: A/AAAA records=<n>, SRV records=<n>, CNAME=<bool>, connected=<bool>` | Shows the number of matching records found in the internal cache, whether a CNAME entry was matched, and the Docker connection status. |
 | `Wildcard match for <name> via <wildcard>` | No exact match was found, but a wildcard record matched. The query name's leftmost label was replaced with `*` to find the match. |
 | `PTR lookup for <name>: <n> record(s), connected=<bool>` | A PTR (reverse DNS) query matched a known container IP. Shows the number of FQDNs and connection status. |
 | `No PTR records for <name>, passing to next plugin` | A PTR query did not match any known container IP, so the query is forwarded to the next plugin. |
@@ -392,7 +449,7 @@ When debug logging is enabled, the plugin logs messages at key decision points t
 | `Configuration: zones=[<zones>], ttl=<n>, label_prefix=<prefix>, networks=[<networks>], max_backoff=<duration>` | Logs the parsed plugin configuration at startup. |
 | `Connected to Docker daemon` | The plugin successfully connected (or reconnected) to the Docker daemon. |
 | `Found <n> running containers` | The number of containers discovered during a record sync. |
-| `Synced <n> records, <n> SRV records, and <n> PTR records` | The number of DNS records generated after a sync. |
+| `Synced <n> records, <n> SRV records, <n> PTR records, and <n> CNAME records` | The number of DNS records generated after a sync. |
 
 ### Readiness Checks
 
@@ -470,6 +527,27 @@ dig _http._tcp.web.docker @127.0.0.1 -p 1053 SRV
 
 ;; ANSWER SECTION:
 _http._tcp.web.docker. 30 IN SRV 10 10 80 web.docker.
+
+;; Query time: 0 msec
+;; SERVER: 127.0.0.1#1053(127.0.0.1) (UDP)
+```
+
+### CNAME record
+
+```shell
+dig web.docker @127.0.0.1 -p 1053 CNAME
+
+; <<>> DiG 9.18.1-1ubuntu1.2-Ubuntu <<>> web.docker @127.0.0.1 -p 1053 CNAME
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 33741
+;; flags: qr aa rd; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 0
+
+;; QUESTION SECTION:
+;web.docker.  IN CNAME
+
+;; ANSWER SECTION:
+web.docker. 30 IN CNAME external.example.com.
 
 ;; Query time: 0 msec
 ;; SERVER: 127.0.0.1#1053(127.0.0.1) (UDP)

@@ -396,6 +396,63 @@ assert_output_contains() {
   docker rm -f coredns-e2e-hostname-srv
 }
 
+@test "[e2e] cname label: CNAME type query returns target" {
+  docker run -d --name coredns-e2e-cname --network bridge \
+    --label "com.dokku.coredns-docker/cname=external.example.com" \
+    alpine sleep 3600
+
+  # Wait for the CNAME record to become resolvable.
+  run wait_for_record "coredns-e2e-cname.${COREDNS_ZONE}" "CNAME"
+  assert_success
+  assert_equal "external.example.com." "$output"
+
+  docker rm -f coredns-e2e-cname
+}
+
+@test "[e2e] cname label: A query on cname name returns CNAME in answer" {
+  docker run -d --name coredns-e2e-cname-a --network bridge \
+    --label "com.dokku.coredns-docker/cname=external.example.com" \
+    alpine sleep 3600
+
+  # Wait for the CNAME entry to exist.
+  run wait_for_record "coredns-e2e-cname-a.${COREDNS_ZONE}" "CNAME"
+  assert_success
+
+  # An A query against the cname name should return a CNAME RR (no recursion
+  # configured, so nothing chases the target). Use +noall +answer so dig
+  # emits just the ANSWER section in master-file format, which gives us a
+  # single line to parse regardless of dig's header/stats layout.
+  run dig +noall +answer +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" \
+    "coredns-e2e-cname-a.${COREDNS_ZONE}" A
+  assert_success
+  # Expect exactly one record: a CNAME pointing at external.example.com.
+  local -a fields
+  read -ra fields <<<"$output"
+  assert_equal "CNAME" "${fields[3]}"
+  assert_equal "external.example.com." "${fields[4]}"
+
+  docker rm -f coredns-e2e-cname-a
+}
+
+@test "[e2e] cname label: no A record is generated for cname container" {
+  docker run -d --name coredns-e2e-cname-noa --network bridge \
+    --label "com.dokku.coredns-docker/cname=external.example.com" \
+    alpine sleep 3600
+
+  run wait_for_record "coredns-e2e-cname-noa.${COREDNS_ZONE}" "CNAME"
+  assert_success
+
+  # An A-only +short response must not contain any IPv4 address — only the
+  # CNAME target string should appear. This catches any regression where the
+  # plugin double-emits A records for cname containers.
+  run dig +short @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-cname-noa.${COREDNS_ZONE}" A
+  assert_success
+  [[ ! "$output" =~ [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ]]
+  assert_output_contains "external.example.com."
+
+  docker rm -f coredns-e2e-cname-noa
+}
+
 @test "[e2e] network filtering: container on unmonitored network does not resolve" {
   docker network create coredns-e2e-unmonitored 2>/dev/null || true
   docker run -d --name coredns-e2e-filtered --network coredns-e2e-unmonitored alpine sleep 3600
