@@ -419,11 +419,15 @@ assert_output_contains() {
   assert_success
 
   # An A query against the cname name should return a CNAME RR (no recursion
-  # configured, so nothing chases the target).
+  # configured, so nothing chases the target). dig's formatted output uses
+  # whitespace that varies by version, so assert on separate substrings
+  # instead of a fixed-layout match.
   run dig +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-cname-a.${COREDNS_ZONE}" A
   assert_success
   assert_output_contains "status: NOERROR"
-  assert_output_contains "CNAME	external.example.com."
+  assert_output_contains "ANSWER: 1"
+  assert_output_contains "CNAME"
+  assert_output_contains "external.example.com."
 
   docker rm -f coredns-e2e-cname-a
 }
