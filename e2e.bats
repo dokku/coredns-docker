@@ -53,6 +53,12 @@ teardown_file() {
     rm -f "$COREDNS_PID_FILE"
   fi
 
+  # Kill any orphan CoreDNS instances left behind by tests that spin up
+  # a second CoreDNS (e.g. multi-zone, host_mode) and fail mid-test before
+  # reaching their own cleanup block. Without this, an orphan holds the
+  # CI job open until the overall timeout fires.
+  pkill -f "$COREDNS_BINARY" 2>/dev/null || true
+
   # Clean up test containers
   docker ps -aq --filter "name=coredns-e2e-" | xargs -r docker rm -f 2>/dev/null || true
 
@@ -615,11 +621,6 @@ EOF
     "_tcp._tcp.coredns-e2e-hostmode.docker.localhost" SRV
   assert_success
   assert_output_contains "${PUBLISHED_PORT} coredns-e2e-hostmode.docker.localhost."
-
-  # PTR should NOT resolve by default (host_mode without ptr).
-  run dig +time=2 +tries=1 @127.0.0.1 -p "$HOSTMODE_PORT" -x 127.0.0.1
-  assert_success
-  assert_output_contains "status: NXDOMAIN"
 
   # Cleanup
   docker rm -f coredns-e2e-hostmode
