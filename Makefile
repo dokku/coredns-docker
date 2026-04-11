@@ -228,3 +228,8 @@ test-e2e: build-local
 .PHONY: test-integration
 test-integration:
 	go test -v -tags integration -count=1 -timeout 120s ./...
+
+.PHONY: coverage
+coverage:
+	go test -tags integration -count=1 -timeout 120s -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out

@@ -206,6 +206,104 @@ func TestParse(t *testing.T) {
 			false,
 			false,
 		},
+		{
+			`docker {
+				label_prefix
+			}`,
+			true,
+			0,
+			nil,
+			"",
+			0,
+			nil,
+			fall.F{},
+			false,
+			false,
+		},
+		{
+			`docker {
+				max_backoff
+			}`,
+			true,
+			0,
+			nil,
+			"",
+			0,
+			nil,
+			fall.F{},
+			false,
+			false,
+		},
+		{
+			`docker {
+				max_backoff bogus
+			}`,
+			true,
+			0,
+			nil,
+			"",
+			0,
+			nil,
+			fall.F{},
+			false,
+			false,
+		},
+		{
+			`docker {
+				networks
+			}`,
+			true,
+			0,
+			nil,
+			"",
+			0,
+			nil,
+			fall.F{},
+			false,
+			false,
+		},
+		{
+			`docker {
+				ttl
+			}`,
+			true,
+			0,
+			nil,
+			"",
+			0,
+			nil,
+			fall.F{},
+			false,
+			false,
+		},
+		{
+			`docker {
+				ttl notanumber
+			}`,
+			true,
+			0,
+			nil,
+			"",
+			0,
+			nil,
+			fall.F{},
+			false,
+			false,
+		},
+		{
+			`docker {
+				zone .
+			}`,
+			true,
+			0,
+			nil,
+			"",
+			0,
+			nil,
+			fall.F{},
+			false,
+			false,
+		},
 	}
 
 	for i, test := range tests {

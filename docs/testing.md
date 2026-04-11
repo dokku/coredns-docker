@@ -66,6 +66,26 @@ make test-e2e
 #  ...
 ```
 
+## Coverage
+
+```bash
+make coverage
+```
+
+This runs `go test -tags integration -coverprofile=coverage.out ./...` and then prints a per-function breakdown with `go tool cover -func=coverage.out`. The last line of the output is a `total:` row with the overall statement coverage percentage for the repository.
+
+**When to use it:** when you want a quick answer to "how well tested is this package?" or you are adding tests and want to see which functions still need coverage. The profile is written to `coverage.out` at the repo root (already gitignored), so you can follow up with `go tool cover -html=coverage.out` to open an annotated, browsable view of each file.
+
+This target runs both the unit tests and the integration suite in one invocation so the reported percentage reflects the whole test corpus. That means it needs the same things `make test-integration` does -- a running Docker daemon and network access to pull the small images the integration tests use.
+
+**Example:**
+
+```bash
+make coverage
+# ...
+# total:                                     (statements)    95.7%
+```
+
 ## Release validation
 
 ```bash
