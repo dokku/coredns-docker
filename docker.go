@@ -44,6 +44,8 @@ type Docker struct {
 	labelPrefix string
 	maxBackoff  time.Duration
 	networks    []string
+	hostMode    bool
+	hostModePTR bool
 
 	mu           sync.RWMutex
 	records      map[string][]net.IP
@@ -402,6 +404,8 @@ func (d *Docker) syncRecords(ctx context.Context) {
 		Inspector:   d.client,
 		LabelPrefix: d.labelPrefix,
 		Networks:    d.networks,
+		HostMode:    d.hostMode,
+		HostModePTR: d.hostModePTR,
 	})
 
 	d.mu.Lock()
@@ -436,6 +440,14 @@ type GenerateRecordsInput struct {
 	LabelPrefix string
 	// Networks is the list of networks to generate records for.
 	Networks []string
+	// HostMode enables host-bound IP/port resolution instead of container IPs.
+	// When true, A/AAAA and SRV records are derived from each container's
+	// published host port bindings (NetworkSettings.Ports).
+	HostMode bool
+	// HostModePTR enables PTR record emission while HostMode is active.
+	// Off by default because multiple containers may share a host IP
+	// (especially the loopback fallback), making reverse lookups noisy.
+	HostModePTR bool
 }
 
 // generateRecords generates the records for the containers.
@@ -541,6 +553,214 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 		srvPrefix := input.LabelPrefix + "/srv."
 		if input.LabelPrefix == "" {
 			srvPrefix = "srv."
+		}
+
+		if input.HostMode {
+			// In host mode, IPs and ports come from the container's host port
+			// bindings (NetworkSettings.Ports) rather than its internal network
+			// IP. This is for setups where CoreDNS runs outside Docker and the
+			// container networks aren't directly reachable.
+			type hostBinding struct {
+				ip   net.IP
+				port uint16
+			}
+
+			// Collect bindings keyed by container port spec (e.g. "80/tcp").
+			bindingsByPort := make(map[string][]hostBinding)
+			var uniqueHostIPs []net.IP
+			seenHostIP := make(map[string]bool)
+			for portSpec, bindings := range inspect.NetworkSettings.Ports {
+				for _, b := range bindings {
+					hostIPStr := b.HostIP
+					if hostIPStr == "" || hostIPStr == "0.0.0.0" {
+						hostIPStr = "127.0.0.1"
+					} else if hostIPStr == "::" {
+						hostIPStr = "::1"
+					}
+					ip := net.ParseIP(hostIPStr)
+					if ip == nil {
+						log.Debugf("Container %s has unparseable host IP %q for port %s", c.ID, b.HostIP, portSpec)
+						continue
+					}
+					hp, err := strconv.Atoi(b.HostPort)
+					if err != nil || hp < 1 || hp > 65535 {
+						log.Debugf("Container %s has invalid host port %q for port %s", c.ID, b.HostPort, portSpec)
+						continue
+					}
+					portStr := string(portSpec)
+					bindingsByPort[portStr] = append(bindingsByPort[portStr], hostBinding{
+						ip:   ip,
+						port: uint16(hp),
+					})
+					key := ip.String()
+					if !seenHostIP[key] {
+						seenHostIP[key] = true
+						uniqueHostIPs = append(uniqueHostIPs, ip)
+					}
+				}
+			}
+
+			if len(uniqueHostIPs) == 0 {
+				log.Debugf("Container %s has no host port bindings, skipping in host mode", c.ID)
+				continue
+			}
+
+			// Deterministic IP ordering so record output is stable.
+			sort.Slice(uniqueHostIPs, func(i, j int) bool {
+				return uniqueHostIPs[i].String() < uniqueHostIPs[j].String()
+			})
+
+			// In host mode there is only one logical destination, so union
+			// names across all selected networks.
+			names := []string{baseName}
+			for _, ne := range networksToProcess {
+				names = append(names, ne.settings.Aliases...)
+				names = append(names, ne.settings.DNSNames...)
+			}
+			if project != "" && service != "" {
+				names = append(names, project+"."+service)
+			}
+			names = append(names, hostnameNames...)
+
+			// Deduplicate names (same rules as the default path).
+			seen := make(map[string]bool, len(names))
+			uniqueNames := names[:0]
+			for _, name := range names {
+				lower := strings.ToLower(name)
+				if lower == "" || seen[lower] {
+					continue
+				}
+				seen[lower] = true
+				uniqueNames = append(uniqueNames, name)
+			}
+			names = uniqueNames
+
+			// Build host-mode SRV entries from labels, translating each label's
+			// container port into its bound host port(s). Multiple bindings for
+			// the same container port produce multiple SRV records.
+			hostSrvs := make(map[string][]uint16)
+			hasSrvLabel := false
+			for k, v := range inspect.Config.Labels {
+				if !strings.HasPrefix(k, srvPrefix) {
+					continue
+				}
+				parts := strings.Split(strings.TrimPrefix(k, srvPrefix), ".")
+				if len(parts) != 2 {
+					log.Debugf("Container %s has invalid SRV label %s", c.ID, k)
+					continue
+				}
+				containerPort, err := strconv.Atoi(v)
+				if err != nil {
+					log.Debugf("Container %s has invalid SRV port %s", c.ID, v)
+					continue
+				}
+				if containerPort < 1 || containerPort > 65535 {
+					log.Debugf("Container %s has SRV port %d not in valid range 1-65535", c.ID, containerPort)
+					continue
+				}
+				hasSrvLabel = true
+				// parts[0] = "_tcp"/"_udp", parts[1] = "_http" etc.
+				proto := strings.TrimPrefix(strings.ToLower(parts[0]), "_")
+				lookup := strconv.Itoa(containerPort) + "/" + proto
+				bindingsForPort, ok := bindingsByPort[lookup]
+				if !ok || len(bindingsForPort) == 0 {
+					log.Debugf("Container %s has SRV label %s=%d but no host binding for %s in host mode", c.ID, k, containerPort, lookup)
+					continue
+				}
+				srvKey := strings.ToLower(parts[1] + "." + parts[0])
+				for _, b := range bindingsForPort {
+					hostSrvs[srvKey] = append(hostSrvs[srvKey], b.port)
+				}
+			}
+
+			// Fallback: if no SRV labels were present at all, derive SRV
+			// records from the bound port specs themselves, mirroring the
+			// default code path but using host ports.
+			if !hasSrvLabel {
+				for portStr, bindings := range bindingsByPort {
+					parts := strings.Split(portStr, "/")
+					cp, err := strconv.Atoi(parts[0])
+					if err != nil {
+						log.Debugf("Container %s has invalid port %s", c.ID, portStr)
+						continue
+					}
+					if cp < 1 || cp > 65535 {
+						log.Debugf("Container %s has port %d not in valid range 1-65535", c.ID, cp)
+						continue
+					}
+					var srvKeys []string
+					if len(parts) > 1 {
+						proto := strings.ToLower(parts[1])
+						srvKeys = []string{"_" + proto + "._" + proto}
+					} else {
+						srvKeys = []string{"_tcp._tcp", "_udp._udp"}
+					}
+					for _, srvKey := range srvKeys {
+						for _, b := range bindings {
+							hostSrvs[srvKey] = append(hostSrvs[srvKey], b.port)
+						}
+					}
+				}
+			}
+
+			// Emit records for each (name, zone) pair.
+			for _, name := range names {
+				for _, zone := range input.Zones {
+					fqdn := strings.ToLower(name + "." + zone)
+					if !strings.HasSuffix(fqdn, ".") {
+						fqdn += "."
+					}
+
+					for _, ip := range uniqueHostIPs {
+						if !slices.ContainsFunc(newRecords[fqdn], ip.Equal) {
+							newRecords[fqdn] = append(newRecords[fqdn], ip)
+						}
+						if enableWildcard {
+							wildcardFqdn := "*." + fqdn
+							if !slices.ContainsFunc(newRecords[wildcardFqdn], ip.Equal) {
+								newRecords[wildcardFqdn] = append(newRecords[wildcardFqdn], ip)
+							}
+						}
+
+						if input.HostModePTR {
+							arpa, arpaErr := dns.ReverseAddr(ip.String())
+							if arpaErr == nil && !slices.Contains(newPtrs[arpa], fqdn) {
+								newPtrs[arpa] = append(newPtrs[arpa], fqdn)
+							}
+						}
+					}
+
+					for srvKey, ports := range hostSrvs {
+						srvName := srvKey + "." + fqdn
+						for _, port := range ports {
+							isDupSrv := slices.ContainsFunc(newSrvs[srvName], func(existing srvRecord) bool {
+								return existing.target == fqdn && existing.port == port
+							})
+							if !isDupSrv {
+								newSrvs[srvName] = append(newSrvs[srvName], srvRecord{
+									target: fqdn,
+									port:   port,
+								})
+							}
+
+							if enableWildcard {
+								wildcardSrvName := srvKey + ".*." + fqdn
+								isDupWildcardSrv := slices.ContainsFunc(newSrvs[wildcardSrvName], func(existing srvRecord) bool {
+									return existing.target == fqdn && existing.port == port
+								})
+								if !isDupWildcardSrv {
+									newSrvs[wildcardSrvName] = append(newSrvs[wildcardSrvName], srvRecord{
+										target: fqdn,
+										port:   port,
+									})
+								}
+							}
+						}
+					}
+				}
+			}
+
+			continue
 		}
 
 		containerSrvs := make(map[string]uint16)

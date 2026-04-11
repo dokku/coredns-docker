@@ -30,8 +30,8 @@ func setup(c *caddy.Controller) error {
 	if err := parse(c, d); err != nil {
 		return plugin.Error(pluginName, err)
 	}
-	log.Debugf("Configuration: zones=[%s], ttl=%d, label_prefix=%q, networks=[%s], max_backoff=%s",
-		strings.Join(d.zones, ", "), d.ttl, d.labelPrefix, strings.Join(d.networks, ", "), d.maxBackoff)
+	log.Debugf("Configuration: zones=[%s], ttl=%d, label_prefix=%q, networks=[%s], max_backoff=%s, host_mode=%t, host_mode_ptr=%t",
+		strings.Join(d.zones, ", "), d.ttl, d.labelPrefix, strings.Join(d.networks, ", "), d.maxBackoff, d.hostMode, d.hostModePTR)
 
 	// Create a new Docker client.
 	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
@@ -105,6 +105,16 @@ func parse(c *caddy.Controller, d *Docker) error {
 				d.ttl = uint32(t)
 			case "fallthrough":
 				d.Fall.SetZonesFromArgs(c.RemainingArgs())
+			case "host_mode":
+				d.hostMode = true
+				for _, arg := range c.RemainingArgs() {
+					switch arg {
+					case "ptr":
+						d.hostModePTR = true
+					default:
+						return c.Errf("unknown host_mode option %q", arg)
+					}
+				}
 			case "zone":
 				args := c.RemainingArgs()
 				if len(args) == 0 {

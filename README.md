@@ -206,6 +206,76 @@ When a PTR query does not match any known container IP, it is passed to the next
 dig -x 172.17.0.2 @127.0.0.1 -p 1053
 ```
 
+### Host Mode
+
+By default, the plugin resolves container names to the container's internal network IP address (e.g. `172.17.0.2`). These IPs are only reachable from inside the Docker network, which is a problem when CoreDNS is running **outside** Docker (a common setup on macOS or when CoreDNS runs directly on the host in a development environment).
+
+Enabling `host_mode` switches the plugin to use each container's **host port bindings** (`-p` / `--publish`) as the source of A/AAAA and SRV records. The container's internal IP is no longer used.
+
+**Enable it in your Corefile:**
+
+```text
+docker.localhost:1053 {
+    docker {
+        zone docker.localhost
+        host_mode
+    }
+}
+```
+
+**What changes when `host_mode` is enabled:**
+
+- **A/AAAA records** use the host IP from each port binding instead of the container's internal network IP.
+- **SRV records** report the **host port** (e.g. `8080`), not the container port (e.g. `80`).
+- If an SRV label specifies a container port that has no matching host binding, that label is skipped (other labels still apply; there is no silent fallback to a different service name).
+- If a container has **no** SRV labels, the plugin falls back to generating SRV records from the container's bound ports — one SRV per binding's host port.
+- Containers with **no** host port bindings produce **no records** in host mode, because they are not reachable from the host.
+- Names (container name, network aliases, DNS names, Docker Compose `project.service`, and `hostname` labels) are unioned across all selected networks, because in host mode all records point at the same host.
+
+**Wildcard host IP normalization:**
+
+Docker often binds to wildcard addresses (`0.0.0.0` or `::`) to accept connections on every interface. These are not usable as record values, so the plugin normalizes them to the corresponding loopback address:
+
+- `0.0.0.0` (or empty) → `127.0.0.1`
+- `::` → `::1`
+
+Bindings to a specific host IP (e.g. `192.168.1.10`) are used as-is.
+
+**PTR records in host mode:**
+
+PTR (reverse DNS) records are **off by default** in host mode. Multiple containers often share a host IP (especially when bound to loopback), which would make reverse lookups return a noisy list of every container bound to that address.
+
+To opt back in, add the `ptr` argument:
+
+```text
+docker.localhost:1053 in-addr.arpa:1053 ip6.arpa:1053 {
+    docker {
+        zone docker.localhost
+        host_mode ptr
+    }
+}
+```
+
+With `host_mode ptr` enabled, a reverse lookup for a host IP will return the FQDNs of every container bound to it.
+
+**Example:**
+
+Start a container with a published port:
+
+```bash
+docker run -d --name web -p 127.0.0.1:18080:80 nginx
+```
+
+With `host_mode` enabled, resolution becomes:
+
+```bash
+dig web.docker.localhost @127.0.0.1 -p 1053
+# → 127.0.0.1
+
+dig _tcp._tcp.web.docker.localhost @127.0.0.1 -p 1053 SRV
+# → 10 10 18080 web.docker.localhost.
+```
+
 ## Compilation
 
 To build coredns with this plugin enabled, run the following command in this repository:
@@ -221,6 +291,7 @@ A binary will be created at `bin/coredns`.
 ```text
 docker {
     fallthrough [ZONES...]
+    host_mode [ptr]
     label_prefix PREFIX
     max_backoff DURATION
     networks NETWORK...
@@ -230,6 +301,8 @@ docker {
 ```
 
 - `fallthrough` **[ZONES...]** - If a query matches the plugin's zone but no record is found, pass the query to the next plugin instead of returning NXDOMAIN. If **ZONES** are specified, only queries for names within those zones will fall through. If no zones are given, all unmatched queries fall through. By default, the plugin returns NXDOMAIN for unknown names. Use this when composing with other plugins that serve the same zone (e.g., `file` as a fallback for static records).
+
+- `host_mode` **[ptr]** - Resolve container names to their host-bound IP addresses and host ports instead of the container's internal network IP. See [Host Mode](#host-mode) for details. Pass the optional `ptr` argument to also emit PTR records for host IPs (off by default).
 
 - `zone` is the domain (or domains) for which the plugin will respond. Multiple zones can be specified separated by spaces. Defaults to `docker.` and cannot be empty.
 

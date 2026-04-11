@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
+	"github.com/docker/go-connections/nat"
 	"github.com/miekg/dns"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -856,6 +858,227 @@ func TestIntegrationPTRRecord(t *testing.T) {
 
 	if ptr.Ptr != fqdn {
 		t.Errorf("expected PTR target %s, got %s", fqdn, ptr.Ptr)
+	}
+}
+
+func TestIntegrationHostModeARecord(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	d.hostMode = true
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	containerID := createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		ExposedPorts: nat.PortSet{
+			nat.Port("5432/tcp"): struct{}{},
+		},
+	}, &container.HostConfig{
+		PortBindings: nat.PortMap{
+			nat.Port("5432/tcp"): []nat.PortBinding{
+				{HostIP: "127.0.0.1", HostPort: "0"},
+			},
+		},
+	}, nil)
+
+	// Inspect to discover the host port Docker assigned.
+	inspect, err := cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		t.Fatalf("Failed to inspect container: %v", err)
+	}
+	bindings := inspect.NetworkSettings.Ports[nat.Port("5432/tcp")]
+	if len(bindings) == 0 {
+		t.Fatalf("expected at least one binding for 5432/tcp, got none")
+	}
+	hostPortStr := bindings[0].HostPort
+	if hostPortStr == "" {
+		t.Fatalf("expected non-empty HostPort, got empty")
+	}
+
+	d.syncRecords(ctx)
+
+	fqdn := name + ".docker."
+	resp, _, err := queryDNS(t, d, fqdn, dns.TypeA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", fqdn, err)
+	}
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected A record for %s in host mode, got none", fqdn)
+	}
+	a, ok := resp.Answer[0].(*dns.A)
+	if !ok {
+		t.Fatalf("expected A record, got %T", resp.Answer[0])
+	}
+	if a.A.String() != "127.0.0.1" {
+		t.Errorf("expected host IP 127.0.0.1 in host mode, got %s", a.A.String())
+	}
+
+	// SRV fallback should emit a _tcp._tcp record pointing at the host port.
+	srvQname := "_tcp._tcp." + fqdn
+	srvResp, _, err := queryDNS(t, d, srvQname, dns.TypeSRV)
+	if err != nil {
+		t.Fatalf("ServeDNS error for SRV %s: %v", srvQname, err)
+	}
+	if srvResp == nil || len(srvResp.Answer) == 0 {
+		t.Fatalf("expected SRV record for %s in host mode, got none", srvQname)
+	}
+	srv, ok := srvResp.Answer[0].(*dns.SRV)
+	if !ok {
+		t.Fatalf("expected SRV record, got %T", srvResp.Answer[0])
+	}
+	if strconv.Itoa(int(srv.Port)) != hostPortStr {
+		t.Errorf("expected SRV host port %s, got %d", hostPortStr, srv.Port)
+	}
+}
+
+func TestIntegrationHostModeSRVLabel(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	d.hostMode = true
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	containerID := createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		Labels: map[string]string{
+			"com.dokku.coredns-docker/srv._tcp._http": "80",
+		},
+		ExposedPorts: nat.PortSet{
+			nat.Port("80/tcp"): struct{}{},
+		},
+	}, &container.HostConfig{
+		PortBindings: nat.PortMap{
+			nat.Port("80/tcp"): []nat.PortBinding{
+				{HostIP: "127.0.0.1", HostPort: "0"},
+			},
+		},
+	}, nil)
+
+	inspect, err := cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		t.Fatalf("Failed to inspect container: %v", err)
+	}
+	bindings := inspect.NetworkSettings.Ports[nat.Port("80/tcp")]
+	if len(bindings) == 0 {
+		t.Fatalf("expected at least one binding for 80/tcp, got none")
+	}
+	hostPortStr := bindings[0].HostPort
+
+	d.syncRecords(ctx)
+
+	srvQname := "_http._tcp." + name + ".docker."
+	resp, _, err := queryDNS(t, d, srvQname, dns.TypeSRV)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", srvQname, err)
+	}
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected SRV record for %s in host mode, got none", srvQname)
+	}
+	srv, ok := resp.Answer[0].(*dns.SRV)
+	if !ok {
+		t.Fatalf("expected SRV record, got %T", resp.Answer[0])
+	}
+	if strconv.Itoa(int(srv.Port)) != hostPortStr {
+		t.Errorf("expected SRV host port %s, got %d", hostPortStr, srv.Port)
+	}
+}
+
+func TestIntegrationHostModeNoBindings(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	d.hostMode = true
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	fqdn := name + ".docker."
+	resp, _, err := queryDNS(t, d, fqdn, dns.TypeA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", fqdn, err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if resp.Rcode != dns.RcodeNameError {
+		t.Errorf("expected NXDOMAIN for container without bindings in host mode, got rcode %d", resp.Rcode)
+	}
+}
+
+func TestIntegrationHostModePTRDefault(t *testing.T) {
+	// By default host_mode does not emit PTR records.
+	d, cli := setupIntegrationDocker(t, nil)
+	d.hostMode = true
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		ExposedPorts: nat.PortSet{
+			nat.Port("80/tcp"): struct{}{},
+		},
+	}, &container.HostConfig{
+		PortBindings: nat.PortMap{
+			nat.Port("80/tcp"): []nat.PortBinding{
+				{HostIP: "127.0.0.1", HostPort: "0"},
+			},
+		},
+	}, nil)
+
+	d.syncRecords(ctx)
+
+	arpa, _ := dns.ReverseAddr("127.0.0.1")
+	_, rcode, _ := queryDNS(t, d, arpa, dns.TypePTR)
+	if rcode != dns.RcodeServerFailure {
+		// With no PTR records stored, the plugin falls through to the
+		// test ErrorHandler which returns SERVFAIL.
+		t.Errorf("expected PTR for %s to pass to next plugin (SERVFAIL) in default host mode, got rcode %d", arpa, rcode)
+	}
+}
+
+func TestIntegrationHostModePTREnabled(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	d.hostMode = true
+	d.hostModePTR = true
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		ExposedPorts: nat.PortSet{
+			nat.Port("80/tcp"): struct{}{},
+		},
+	}, &container.HostConfig{
+		PortBindings: nat.PortMap{
+			nat.Port("80/tcp"): []nat.PortBinding{
+				{HostIP: "127.0.0.1", HostPort: "0"},
+			},
+		},
+	}, nil)
+
+	d.syncRecords(ctx)
+
+	arpa, _ := dns.ReverseAddr("127.0.0.1")
+	resp, _, err := queryDNS(t, d, arpa, dns.TypePTR)
+	if err != nil {
+		t.Fatalf("ServeDNS error for PTR %s: %v", arpa, err)
+	}
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected PTR record for %s with host_mode ptr, got none", arpa)
+	}
+	ptr, ok := resp.Answer[0].(*dns.PTR)
+	if !ok {
+		t.Fatalf("expected PTR record, got %T", resp.Answer[0])
+	}
+	expected := name + ".docker."
+	if ptr.Ptr != expected {
+		t.Errorf("expected PTR target %s, got %s", expected, ptr.Ptr)
 	}
 }
 

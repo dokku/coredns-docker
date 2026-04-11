@@ -53,6 +53,12 @@ teardown_file() {
     rm -f "$COREDNS_PID_FILE"
   fi
 
+  # Kill any orphan CoreDNS instances left behind by tests that spin up
+  # a second CoreDNS (e.g. multi-zone, host_mode) and fail mid-test before
+  # reaching their own cleanup block. Without this, an orphan holds the
+  # CI job open until the overall timeout fires.
+  pkill -f "$COREDNS_BINARY" 2>/dev/null || true
+
   # Clean up test containers
   docker ps -aq --filter "name=coredns-e2e-" | xargs -r docker rm -f 2>/dev/null || true
 
@@ -567,4 +573,209 @@ EOF
   # PTR should also be gone
   run dig +short +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" -x "$container_ip"
   [[ -z "$output" ]]
+}
+
+@test "[e2e] host_mode: published port resolves to host IP and host port" {
+  local HOSTMODE_COREFILE
+  HOSTMODE_COREFILE="$(mktemp /tmp/Corefile.hostmode.XXXXXX)"
+  local HOSTMODE_PORT=15355
+  local PUBLISHED_PORT=15800
+  cat >"$HOSTMODE_COREFILE" <<EOF
+docker.localhost:${HOSTMODE_PORT} {
+    log
+    errors
+    debug
+    docker {
+        zone docker.localhost
+        ttl 10
+        networks bridge ${TEST_NETWORK}
+        host_mode
+    }
+}
+EOF
+
+  "$COREDNS_BINARY" -conf "$HOSTMODE_COREFILE" &
+  local HOSTMODE_PID=$!
+
+  # Wait for CoreDNS to become ready
+  local retries=20 i=0
+  while [ "$i" -lt "$retries" ]; do
+    if dig +short +time=1 +tries=1 @127.0.0.1 -p "$HOSTMODE_PORT" version.bind chaos txt >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+
+  docker run -d --name coredns-e2e-hostmode --network bridge \
+    -p "127.0.0.1:${PUBLISHED_PORT}:80" \
+    alpine sleep 3600
+
+  # A record should resolve to the published host IP.
+  run wait_for_record_on_port "coredns-e2e-hostmode.docker.localhost" "A" "$HOSTMODE_PORT"
+  assert_success
+  assert_equal "127.0.0.1" "$output"
+
+  # SRV fallback should emit a record with the published host port.
+  run dig +short +time=2 +tries=1 @127.0.0.1 -p "$HOSTMODE_PORT" \
+    "_tcp._tcp.coredns-e2e-hostmode.docker.localhost" SRV
+  assert_success
+  assert_output_contains "${PUBLISHED_PORT} coredns-e2e-hostmode.docker.localhost."
+
+  # Cleanup
+  docker rm -f coredns-e2e-hostmode
+  kill "$HOSTMODE_PID" 2>/dev/null || true
+  wait "$HOSTMODE_PID" 2>/dev/null || true
+  rm -f "$HOSTMODE_COREFILE"
+}
+
+@test "[e2e] host_mode: container without published ports produces no records" {
+  local HOSTMODE_COREFILE
+  HOSTMODE_COREFILE="$(mktemp /tmp/Corefile.hostmode.XXXXXX)"
+  local HOSTMODE_PORT=15356
+  cat >"$HOSTMODE_COREFILE" <<EOF
+docker.localhost:${HOSTMODE_PORT} {
+    log
+    errors
+    debug
+    docker {
+        zone docker.localhost
+        ttl 10
+        networks bridge ${TEST_NETWORK}
+        host_mode
+    }
+}
+EOF
+
+  "$COREDNS_BINARY" -conf "$HOSTMODE_COREFILE" &
+  local HOSTMODE_PID=$!
+
+  local retries=20 i=0
+  while [ "$i" -lt "$retries" ]; do
+    if dig +short +time=1 +tries=1 @127.0.0.1 -p "$HOSTMODE_PORT" version.bind chaos txt >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+
+  docker run -d --name coredns-e2e-hostmode-nobind --network bridge alpine sleep 3600
+  sleep 2
+
+  run dig +time=2 +tries=1 @127.0.0.1 -p "$HOSTMODE_PORT" \
+    "coredns-e2e-hostmode-nobind.docker.localhost" A
+  assert_success
+  assert_output_contains "status: NXDOMAIN"
+
+  # Cleanup
+  docker rm -f coredns-e2e-hostmode-nobind
+  kill "$HOSTMODE_PID" 2>/dev/null || true
+  wait "$HOSTMODE_PID" 2>/dev/null || true
+  rm -f "$HOSTMODE_COREFILE"
+}
+
+@test "[e2e] host_mode default: PTR query returns no answer" {
+  local HOSTMODE_COREFILE
+  HOSTMODE_COREFILE="$(mktemp /tmp/Corefile.hostmode.XXXXXX)"
+  local HOSTMODE_PORT=15357
+  local PUBLISHED_PORT=15801
+  cat >"$HOSTMODE_COREFILE" <<EOF
+docker.localhost:${HOSTMODE_PORT} in-addr.arpa:${HOSTMODE_PORT} ip6.arpa:${HOSTMODE_PORT} {
+    log
+    errors
+    debug
+    docker {
+        zone docker.localhost
+        ttl 10
+        networks bridge ${TEST_NETWORK}
+        host_mode
+    }
+}
+EOF
+
+  "$COREDNS_BINARY" -conf "$HOSTMODE_COREFILE" &
+  local HOSTMODE_PID=$!
+
+  local retries=20 i=0
+  while [ "$i" -lt "$retries" ]; do
+    if dig +short +time=1 +tries=1 @127.0.0.1 -p "$HOSTMODE_PORT" version.bind chaos txt >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+
+  docker run -d --name coredns-e2e-hostmode-ptr-off --network bridge \
+    -p "127.0.0.1:${PUBLISHED_PORT}:80" \
+    alpine sleep 3600
+
+  # Sanity: forward resolution works, so we know the plugin has seen the container.
+  run wait_for_record_on_port "coredns-e2e-hostmode-ptr-off.docker.localhost" "A" "$HOSTMODE_PORT"
+  assert_success
+  assert_equal "127.0.0.1" "$output"
+
+  # PTR should not return an answer because host_mode without ptr skips PTR
+  # records entirely. The query reaches the plugin (in-addr.arpa is in the
+  # server block) but the plugin has no PTR entries to serve.
+  run dig +short +time=2 +tries=1 @127.0.0.1 -p "$HOSTMODE_PORT" -x 127.0.0.1
+  [[ -z "$output" ]]
+
+  # Cleanup
+  docker rm -f coredns-e2e-hostmode-ptr-off
+  kill "$HOSTMODE_PID" 2>/dev/null || true
+  wait "$HOSTMODE_PID" 2>/dev/null || true
+  rm -f "$HOSTMODE_COREFILE"
+}
+
+@test "[e2e] host_mode ptr: PTR for host IP resolves to container FQDN" {
+  local HOSTMODE_COREFILE
+  HOSTMODE_COREFILE="$(mktemp /tmp/Corefile.hostmode.XXXXXX)"
+  local HOSTMODE_PORT=15358
+  local PUBLISHED_PORT=15802
+  cat >"$HOSTMODE_COREFILE" <<EOF
+docker.localhost:${HOSTMODE_PORT} in-addr.arpa:${HOSTMODE_PORT} ip6.arpa:${HOSTMODE_PORT} {
+    log
+    errors
+    debug
+    docker {
+        zone docker.localhost
+        ttl 10
+        networks bridge ${TEST_NETWORK}
+        host_mode ptr
+    }
+}
+EOF
+
+  "$COREDNS_BINARY" -conf "$HOSTMODE_COREFILE" &
+  local HOSTMODE_PID=$!
+
+  local retries=20 i=0
+  while [ "$i" -lt "$retries" ]; do
+    if dig +short +time=1 +tries=1 @127.0.0.1 -p "$HOSTMODE_PORT" version.bind chaos txt >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+
+  docker run -d --name coredns-e2e-hostmode-ptr-on --network bridge \
+    -p "127.0.0.1:${PUBLISHED_PORT}:80" \
+    alpine sleep 3600
+
+  # Sanity: forward resolution works first.
+  run wait_for_record_on_port "coredns-e2e-hostmode-ptr-on.docker.localhost" "A" "$HOSTMODE_PORT"
+  assert_success
+  assert_equal "127.0.0.1" "$output"
+
+  # With `host_mode ptr`, reverse resolution of the host IP should return
+  # the container's FQDN.
+  run wait_for_record_on_port "1.0.0.127.in-addr.arpa" "PTR" "$HOSTMODE_PORT"
+  assert_success
+  assert_output_contains "coredns-e2e-hostmode-ptr-on.docker.localhost."
+
+  # Cleanup
+  docker rm -f coredns-e2e-hostmode-ptr-on
+  kill "$HOSTMODE_PID" 2>/dev/null || true
+  wait "$HOSTMODE_PID" 2>/dev/null || true
+  rm -f "$HOSTMODE_COREFILE"
 }
