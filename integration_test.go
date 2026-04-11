@@ -92,6 +92,7 @@ func setupIntegrationDocker(t *testing.T, networks []string) (*Docker, *client.C
 		records:     make(map[string][]net.IP),
 		srvs:        make(map[string][]srvRecord),
 		ptrs:        make(map[string][]string),
+		cnames:      make(map[string]string),
 	}
 
 	return d, cli
@@ -678,6 +679,69 @@ func TestIntegrationHostnameLabel(t *testing.T) {
 	}
 	if !a2.A.Equal(containerA.A) {
 		t.Errorf("expected hostname %s to resolve to %s, got %s", hostnameFqdn2, containerA.A, a2.A)
+	}
+}
+
+func TestIntegrationCNAMELabel(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		Labels: map[string]string{
+			"com.dokku.coredns-docker/cname": "external.example.com",
+		},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	fqdn := name + ".docker."
+
+	// CNAME'd container must not appear in the A/AAAA map.
+	d.mu.RLock()
+	if _, ok := d.records[fqdn]; ok {
+		d.mu.RUnlock()
+		t.Fatalf("expected no A records for CNAME'd container %s, but found some", fqdn)
+	}
+	// The cname map must contain the FQDN with the target normalized to a
+	// trailing dot.
+	target, ok := d.cnames[fqdn]
+	d.mu.RUnlock()
+	if !ok {
+		t.Fatalf("expected CNAME entry for %s, not found", fqdn)
+	}
+	if target != "external.example.com." {
+		t.Errorf("expected CNAME target external.example.com., got %s", target)
+	}
+
+	// CNAME type query returns the CNAME answer.
+	resp, _, err := queryDNS(t, d, fqdn, dns.TypeCNAME)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s CNAME: %v", fqdn, err)
+	}
+	if resp == nil || len(resp.Answer) != 1 {
+		t.Fatalf("expected 1 CNAME answer for %s, got %+v", fqdn, resp)
+	}
+	cname, ok := resp.Answer[0].(*dns.CNAME)
+	if !ok {
+		t.Fatalf("expected *dns.CNAME, got %T", resp.Answer[0])
+	}
+	if cname.Target != "external.example.com." {
+		t.Errorf("expected CNAME target external.example.com., got %s", cname.Target)
+	}
+
+	// A query on the CNAME name also returns a CNAME (resolver chases it).
+	resp, _, err = queryDNS(t, d, fqdn, dns.TypeA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s A: %v", fqdn, err)
+	}
+	if resp == nil || len(resp.Answer) != 1 {
+		t.Fatalf("expected 1 CNAME answer for %s A query, got %+v", fqdn, resp)
+	}
+	if _, ok := resp.Answer[0].(*dns.CNAME); !ok {
+		t.Errorf("expected CNAME answer for A query on CNAME name, got %T", resp.Answer[0])
 	}
 }
 

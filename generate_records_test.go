@@ -28,17 +28,20 @@ func mustReverseAddr(ip string) string {
 	return arpa
 }
 
+type generateRecordsExpected struct {
+	records map[string][]net.IP
+	srvs    map[string][]srvRecord
+	ptrs    map[string][]string
+	cnames  map[string]string
+}
+
 func TestGenerateRecords(t *testing.T) {
 	ctx := context.Background()
 
 	tests := []struct {
 		name     string
 		input    GenerateRecordsInput
-		expected struct {
-			records map[string][]net.IP
-			srvs    map[string][]srvRecord
-			ptrs    map[string][]string
-		}
+		expected generateRecordsExpected
 	}{
 		{
 			name: "basic container name",
@@ -71,11 +74,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -115,11 +114,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 					"www.docker.": {net.ParseIP("172.17.0.2")},
@@ -163,11 +158,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"myproj_mysvc_1.docker.": {net.ParseIP("172.17.0.3")},
 					"myproj.mysvc.docker.":   {net.ParseIP("172.17.0.3")},
@@ -209,11 +200,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -262,11 +249,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"db.docker.": {net.ParseIP("172.17.0.3")},
 				},
@@ -315,11 +298,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"app.docker.": {net.ParseIP("172.17.0.4")},
 				},
@@ -385,11 +364,7 @@ func TestGenerateRecords(t *testing.T) {
 				LabelPrefix: "com.dokku.coredns-docker",
 				Networks:    []string{"bridge"},
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -430,11 +405,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -479,11 +450,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -524,11 +491,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -573,11 +536,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -622,11 +581,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -668,11 +623,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -725,11 +676,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -766,11 +713,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{},
 				srvs:    map[string][]srvRecord{},
 				ptrs:    map[string][]string{},
@@ -799,11 +742,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{},
 				srvs:    map[string][]srvRecord{},
 				ptrs:    map[string][]string{},
@@ -836,11 +775,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -877,11 +812,7 @@ func TestGenerateRecords(t *testing.T) {
 				LabelPrefix: "com.dokku.coredns-docker",
 				Networks:    []string{"custom"},
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("10.0.0.2")},
 				},
@@ -918,11 +849,7 @@ func TestGenerateRecords(t *testing.T) {
 				LabelPrefix: "com.dokku.coredns-docker",
 				Networks:    []string{"bridge", "custom"},
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2"), net.ParseIP("10.0.0.2")},
 				},
@@ -958,11 +885,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -1001,11 +924,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker.", "internal."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
 					"web.internal.": {net.ParseIP("172.17.0.2")},
@@ -1047,11 +966,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker.", "internal."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
 					"web.internal.": {net.ParseIP("172.17.0.2")},
@@ -1100,11 +1015,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
 					"myapp.docker.": {net.ParseIP("172.17.0.2")},
@@ -1146,11 +1057,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":  {net.ParseIP("172.17.0.2")},
 					"app1.docker.": {net.ParseIP("172.17.0.2")},
@@ -1194,11 +1101,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":  {net.ParseIP("172.17.0.2")},
 					"app1.docker.": {net.ParseIP("172.17.0.2")},
@@ -1242,11 +1145,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -1287,11 +1186,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -1332,11 +1227,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
 					"myapp.docker.": {net.ParseIP("172.17.0.2")},
@@ -1379,11 +1270,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
 					"myapp.docker.": {net.ParseIP("172.17.0.2")},
@@ -1432,11 +1319,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker.", "internal."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":     {net.ParseIP("172.17.0.2")},
 					"web.internal.":   {net.ParseIP("172.17.0.2")},
@@ -1480,11 +1363,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
 					"*.web.docker.": {net.ParseIP("172.17.0.2")},
@@ -1526,11 +1405,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -1572,11 +1447,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
 					"*.web.docker.": {net.ParseIP("172.17.0.2")},
@@ -1625,11 +1496,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
 					"*.web.docker.": {net.ParseIP("172.17.0.2")},
@@ -1672,11 +1539,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":     {net.ParseIP("172.17.0.2")},
 					"*.web.docker.":   {net.ParseIP("172.17.0.2")},
@@ -1720,11 +1583,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker.", "internal."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":     {net.ParseIP("172.17.0.2")},
 					"*.web.docker.":   {net.ParseIP("172.17.0.2")},
@@ -1769,11 +1628,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
 					"*.web.docker.": {net.ParseIP("172.17.0.2")},
@@ -1816,11 +1671,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 					"api.docker.": {net.ParseIP("172.17.0.2")},
@@ -1861,11 +1712,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":    {net.ParseIP("172.17.0.2")},
 					"abc123.docker.": {net.ParseIP("172.17.0.2")},
@@ -1907,11 +1754,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -1954,11 +1797,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -2004,11 +1843,7 @@ func TestGenerateRecords(t *testing.T) {
 				Zones:       []string{"docker."},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("172.17.0.2")},
 					"*.web.docker.": {net.ParseIP("172.17.0.2")},
@@ -2055,11 +1890,7 @@ func TestGenerateRecords(t *testing.T) {
 				Networks:    []string{"bridge", "custom"},
 				LabelPrefix: "com.dokku.coredns-docker",
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("172.17.0.2")},
 				},
@@ -2107,11 +1938,7 @@ func TestGenerateRecords(t *testing.T) {
 				LabelPrefix: "com.dokku.coredns-docker",
 				HostMode:    true,
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("192.168.1.10")},
 				},
@@ -2163,11 +1990,7 @@ func TestGenerateRecords(t *testing.T) {
 				LabelPrefix: "com.dokku.coredns-docker",
 				HostMode:    true,
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("127.0.0.1")},
 				},
@@ -2219,11 +2042,7 @@ func TestGenerateRecords(t *testing.T) {
 				LabelPrefix: "com.dokku.coredns-docker",
 				HostMode:    true,
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("::1")},
 				},
@@ -2277,11 +2096,7 @@ func TestGenerateRecords(t *testing.T) {
 				LabelPrefix: "com.dokku.coredns-docker",
 				HostMode:    true,
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.": {net.ParseIP("127.0.0.1")},
 				},
@@ -2336,11 +2151,7 @@ func TestGenerateRecords(t *testing.T) {
 				LabelPrefix: "com.dokku.coredns-docker",
 				HostMode:    true,
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					// sorted ascending by string() form
 					"web.docker.": {net.ParseIP("192.168.1.10"), net.ParseIP("192.168.1.11")},
@@ -2396,11 +2207,7 @@ func TestGenerateRecords(t *testing.T) {
 				LabelPrefix: "com.dokku.coredns-docker",
 				HostMode:    true,
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				// Label is present so fallback does NOT run; no _http SRV
 				// is emitted and no fallback _tcp._tcp is emitted either.
 				records: map[string][]net.IP{
@@ -2442,11 +2249,7 @@ func TestGenerateRecords(t *testing.T) {
 				LabelPrefix: "com.dokku.coredns-docker",
 				HostMode:    true,
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{},
 				srvs:    map[string][]srvRecord{},
 				ptrs:    map[string][]string{},
@@ -2492,11 +2295,7 @@ func TestGenerateRecords(t *testing.T) {
 				LabelPrefix: "com.dokku.coredns-docker",
 				HostMode:    true,
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				// empty HostPort binding is skipped -> container has no
 				// usable bindings -> no records at all.
 				records: map[string][]net.IP{},
@@ -2550,11 +2349,7 @@ func TestGenerateRecords(t *testing.T) {
 				Networks:    []string{"bridge", "custom"},
 				HostMode:    true,
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("127.0.0.1")},
 					"alpha.docker.": {net.ParseIP("127.0.0.1")},
@@ -2611,11 +2406,7 @@ func TestGenerateRecords(t *testing.T) {
 				LabelPrefix: "com.dokku.coredns-docker",
 				HostMode:    true,
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("127.0.0.1")},
 					"*.web.docker.": {net.ParseIP("127.0.0.1")},
@@ -2670,11 +2461,7 @@ func TestGenerateRecords(t *testing.T) {
 				HostMode:    true,
 				HostModePTR: true,
 			},
-			expected: struct {
-				records map[string][]net.IP
-				srvs    map[string][]srvRecord
-				ptrs    map[string][]string
-			}{
+			expected: generateRecordsExpected{
 				records: map[string][]net.IP{
 					"web.docker.":   {net.ParseIP("192.168.1.10")},
 					"*.web.docker.": {net.ParseIP("192.168.1.10")},
@@ -2689,11 +2476,410 @@ func TestGenerateRecords(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "container with cname label",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/cname": "external.example.com.",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: generateRecordsExpected{
+				// CNAME suppresses A/AAAA/SRV/PTR.
+				records: map[string][]net.IP{},
+				srvs:    map[string][]srvRecord{},
+				ptrs:    map[string][]string{},
+				cnames: map[string]string{
+					"web.docker.": "external.example.com.",
+				},
+			},
+		},
+		{
+			name: "container with cname label missing trailing dot",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/cname": "external.example.com",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: generateRecordsExpected{
+				records: map[string][]net.IP{},
+				srvs:    map[string][]srvRecord{},
+				ptrs:    map[string][]string{},
+				cnames: map[string]string{
+					"web.docker.": "external.example.com.",
+				},
+			},
+		},
+		{
+			name: "container with empty cname label falls back to A records",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/cname": "",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: generateRecordsExpected{
+				records: map[string][]net.IP{
+					"web.docker.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
+			},
+		},
+		{
+			name: "container with cname and hostname label uses cname for all names",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/cname":    "external.example.com.",
+									"com.dokku.coredns-docker/hostname": "myapp,www",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+										Aliases:   []string{"alias1"},
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: generateRecordsExpected{
+				records: map[string][]net.IP{},
+				srvs:    map[string][]srvRecord{},
+				ptrs:    map[string][]string{},
+				cnames: map[string]string{
+					"web.docker.":    "external.example.com.",
+					"alias1.docker.": "external.example.com.",
+					"myapp.docker.":  "external.example.com.",
+					"www.docker.":    "external.example.com.",
+				},
+			},
+		},
+		{
+			name: "container with cname label suppresses srv labels",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/cname":          "external.example.com.",
+									"com.dokku.coredns-docker/srv._tcp._http": "80",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: generateRecordsExpected{
+				records: map[string][]net.IP{},
+				srvs:    map[string][]srvRecord{},
+				ptrs:    map[string][]string{},
+				cnames: map[string]string{
+					"web.docker.": "external.example.com.",
+				},
+			},
+		},
+		{
+			name: "container with cname and wildcard label",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/cname":    "external.example.com.",
+									"com.dokku.coredns-docker/wildcard": "true",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: generateRecordsExpected{
+				records: map[string][]net.IP{},
+				srvs:    map[string][]srvRecord{},
+				ptrs:    map[string][]string{},
+				cnames: map[string]string{
+					"web.docker.":   "external.example.com.",
+					"*.web.docker.": "external.example.com.",
+				},
+			},
+		},
+		{
+			name: "container with cname label and multi-zone",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/cname": "external.example.com.",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker.", "internal."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: generateRecordsExpected{
+				records: map[string][]net.IP{},
+				srvs:    map[string][]srvRecord{},
+				ptrs:    map[string][]string{},
+				cnames: map[string]string{
+					"web.docker.":   "external.example.com.",
+					"web.internal.": "external.example.com.",
+				},
+			},
+		},
+		{
+			name: "container with cname label and empty label prefix",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"cname": "external.example.com.",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "",
+			},
+			expected: generateRecordsExpected{
+				records: map[string][]net.IP{},
+				srvs:    map[string][]srvRecord{},
+				ptrs:    map[string][]string{},
+				cnames: map[string]string{
+					"web.docker.": "external.example.com.",
+				},
+			},
+		},
+		{
+			name: "container with cname label in host mode",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/cname": "external.example.com.",
+								},
+							},
+							NetworkSettings: func() *container.NetworkSettings {
+								ns := &container.NetworkSettings{
+									Networks: map[string]*network.EndpointSettings{
+										"bridge": {
+											IPAddress: "172.17.0.2",
+										},
+									},
+								}
+								ns.Ports = nat.PortMap{
+									nat.Port("80/tcp"): []nat.PortBinding{
+										{HostIP: "127.0.0.1", HostPort: "18080"},
+									},
+								}
+								return ns
+							}(),
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+				HostMode:    true,
+				HostModePTR: true,
+			},
+			expected: generateRecordsExpected{
+				// Host mode: CNAME still short-circuits before host bindings are
+				// examined, so no A/AAAA/SRV/PTR records are emitted.
+				records: map[string][]net.IP{},
+				srvs:    map[string][]srvRecord{},
+				ptrs:    map[string][]string{},
+				cnames: map[string]string{
+					"web.docker.": "external.example.com.",
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			records, srvs, ptrs := generateRecords(ctx, tt.input)
+			records, srvs, ptrs, cnames := generateRecords(ctx, tt.input)
 
 			// Check records
 			if len(records) != len(tt.expected.records) {
@@ -2785,6 +2971,31 @@ func TestGenerateRecords(t *testing.T) {
 					if actualFqdns[i] != expectedFqdn {
 						t.Errorf("expected FQDN %s for %s at index %d, got %s", expectedFqdn, arpa, i, actualFqdns[i])
 					}
+				}
+			}
+
+			// Check CNAME records
+			if len(cnames) != len(tt.expected.cnames) {
+				t.Errorf("expected %d CNAME records, got %d", len(tt.expected.cnames), len(cnames))
+				for fqdn := range cnames {
+					if _, ok := tt.expected.cnames[fqdn]; !ok {
+						t.Errorf("unexpected CNAME record: %s", fqdn)
+					}
+				}
+				for fqdn := range tt.expected.cnames {
+					if _, ok := cnames[fqdn]; !ok {
+						t.Errorf("missing CNAME record: %s", fqdn)
+					}
+				}
+			}
+			for fqdn, expectedTarget := range tt.expected.cnames {
+				actualTarget, ok := cnames[fqdn]
+				if !ok {
+					t.Errorf("expected CNAME record for %s, not found", fqdn)
+					continue
+				}
+				if actualTarget != expectedTarget {
+					t.Errorf("expected CNAME target %s for %s, got %s", expectedTarget, fqdn, actualTarget)
 				}
 			}
 		})
