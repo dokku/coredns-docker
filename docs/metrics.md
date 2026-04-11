@@ -28,7 +28,7 @@ curl -s http://127.0.0.1:9153/metrics | grep coredns_docker
 Every metric is in the `coredns_docker` namespace. Counters monotonically increase, gauges can go up and down, and histograms include `_count`, `_sum`, and `_bucket` series.
 
 | Metric | Type | Labels | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `coredns_docker_success_requests_total` | counter | `server` | DNS requests handled successfully |
 | `coredns_docker_failed_requests_total` | counter | `server` | DNS requests that failed |
 | `coredns_docker_request_duration_seconds` | histogram | `server`, `type` | Latency of DNS requests, bucketed; `type` is the query type (`A`, `AAAA`, `SRV`, `TXT`, `CNAME`, `PTR`, ...) |

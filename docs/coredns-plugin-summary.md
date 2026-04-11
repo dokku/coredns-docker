@@ -12,13 +12,13 @@ This is an out-of-tree plugin maintained at <https://github.com/dokku/coredns-do
 
 ## Syntax
 
-~~~
+~~~ txt
 docker
 ~~~
 
 With only the plugin name specified and no options, the *docker* plugin answers queries in the `docker.` zone using records derived from the local Docker daemon with default settings.
 
-```
+~~~ txt
 docker {
     zone ZONE [ZONE...]
     ttl SECONDS
@@ -28,7 +28,7 @@ docker {
     fallthrough [ZONES...]
     host_mode [ptr]
 }
-```
+~~~
 
 * `zone` **ZONE [ZONE...]** sets the DNS zones the plugin is authoritative for. Multiple zones may be listed. Defaults to `docker.`. Trailing dots are optional; an empty zone is rejected.
 * `ttl` **SECONDS** sets the TTL on all answers. Valid range is `0` to `3600`. Defaults to `30`. A TTL of `0` disables downstream caching.

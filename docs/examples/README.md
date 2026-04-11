@@ -31,7 +31,7 @@ Each directory in this folder is a runnable demonstration of a specific feature.
 ## Example index
 
 | Directory | Demonstrates |
-|---|---|
+| --- | --- |
 | [01-basic](01-basic) | Default `zone docker.`, no labels, resolving a container by its name |
 | [02-custom-hostname](02-custom-hostname) | `hostname` label with multiple comma-separated names |
 | [03-cname](03-cname) | `cname` label aliasing a container to an external name |

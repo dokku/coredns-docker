@@ -17,7 +17,7 @@ The outer `docker:1053` says "listen on port `1053` for queries in the `docker.`
 ## Options at a glance
 
 | Option | Argument | Default | Purpose |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | [`zone`](#zone) | domain names | `docker.` | Zones the plugin answers for |
 | [`ttl`](#ttl) | seconds (0-3600) | `30` | TTL on all answers |
 | [`label_prefix`](#label_prefix) | string | `com.dokku.coredns-docker` | Namespace for Docker labels the plugin reads |
@@ -226,7 +226,7 @@ For every configured zone, the plugin generates a synthetic SOA and NS record fo
 The SOA and NS records have these values:
 
 | Field | Value |
-|---|---|
+| --- | --- |
 | NS target | `ns.dns.<zone>` |
 | SOA MNAME | `ns.dns.<zone>` |
 | SOA RNAME | `hostmaster.<zone>` |
