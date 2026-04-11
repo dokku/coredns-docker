@@ -1,0 +1,24 @@
+# CNAME example: alias a container to an external domain.
+#
+# Start CoreDNS:
+#   coredns-docker -conf Corefile
+# Start the demo container:
+#   docker compose up -d
+#
+# Verify:
+#   dig @127.0.0.1 -p 1053 web.docker CNAME +short
+#   # → external.example.com.
+#
+# An A query also returns the CNAME; resolvers chase it automatically:
+#   dig @127.0.0.1 -p 1053 web.docker A
+#
+# Setting a cname label suppresses A/AAAA/SRV/PTR/TXT for that container per RFC 1034.
+
+name: cname-example
+
+services:
+  web:
+    image: nginx:alpine
+    container_name: cname-web
+    labels:
+      com.dokku.coredns-docker/cname: "external.example.com"

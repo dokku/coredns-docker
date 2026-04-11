@@ -1,0 +1,23 @@
+# SRV records example: advertise services on a container via srv labels.
+#
+# Start CoreDNS:
+#   coredns-docker -conf Corefile
+# Start the demo container:
+#   docker compose up -d
+#
+# Verify:
+#   dig @127.0.0.1 -p 1053 _http._tcp.web.docker SRV +short
+#   # → 10 10 80 web.docker.
+#
+#   dig @127.0.0.1 -p 1053 _https._tcp.web.docker SRV +short
+#   # → 10 10 443 web.docker.
+
+name: srv-example
+
+services:
+  web:
+    image: nginx:alpine
+    container_name: srv-web
+    labels:
+      com.dokku.coredns-docker/srv._tcp._http: "80"
+      com.dokku.coredns-docker/srv._tcp._https: "443"

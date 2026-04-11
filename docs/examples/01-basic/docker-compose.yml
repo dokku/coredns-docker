@@ -1,0 +1,19 @@
+# Basic example: resolve a container by its name and by its Compose project.service pair.
+#
+# Start CoreDNS in one terminal:
+#   coredns-docker -conf Corefile
+#
+# Start the demo container in another:
+#   docker compose up -d
+#
+# Verify:
+#   dig @127.0.0.1 -p 1053 web.docker +short
+#   dig @127.0.0.1 -p 1053 basic.web.docker +short   # compose project.service
+#   dig @127.0.0.1 -p 1053 -x "$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' basic-web-1)" +short
+
+name: basic
+
+services:
+  web:
+    image: nginx:alpine
+    container_name: basic-web

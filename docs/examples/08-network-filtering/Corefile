@@ -1,0 +1,8 @@
+docker.:1053 in-addr.arpa:1053 ip6.arpa:1053 {
+    errors
+    log
+    docker {
+        zone docker.
+        networks netfilter-allowed
+    }
+}

@@ -1,0 +1,51 @@
+# Nginx reverse proxy integration example.
+#
+# nginx runs in a container, resolves backend names via CoreDNS running on the
+# host, and proxies requests to two unrelated backend containers. Restarting a
+# backend container changes its IP, and nginx picks the change up automatically
+# on its next resolver refresh (valid=10s in nginx.conf).
+#
+# 1. Start CoreDNS with this example's Corefile:
+#      coredns-docker -conf Corefile
+# 2. Start the demo containers:
+#      docker compose up -d
+# 3. Hit nginx via the host-published port:
+#      curl -sv http://localhost:8080/           # proxied to web.docker
+#      curl -sv http://localhost:8080/api/       # proxied to api.docker
+# 4. Verify dynamic resolution by restarting a backend:
+#      docker compose restart web
+#      curl -s http://localhost:8080/            # continues working; new IP picked up
+
+name: nginx-integration
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+          gateway: 172.28.0.1
+
+services:
+  proxy:
+    image: nginx:alpine
+    container_name: nginx-integration-proxy
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - web
+      - api
+
+  web:
+    image: nginx:alpine
+    container_name: nginx-integration-web
+    labels:
+      com.dokku.coredns-docker/hostname: "web"
+
+  api:
+    image: nginx:alpine
+    container_name: nginx-integration-api
+    labels:
+      com.dokku.coredns-docker/hostname: "api"

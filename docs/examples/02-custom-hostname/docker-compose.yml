@@ -1,0 +1,20 @@
+# Custom hostname example: attach extra DNS names to a container via the hostname label.
+#
+# Start CoreDNS:
+#   coredns-docker -conf Corefile
+# Start the demo container:
+#   docker compose up -d
+#
+# Verify (all three names return the same IP):
+#   dig @127.0.0.1 -p 1053 web.docker +short
+#   dig @127.0.0.1 -p 1053 myapp.docker +short
+#   dig @127.0.0.1 -p 1053 www.docker +short
+
+name: hostname-example
+
+services:
+  web:
+    image: nginx:alpine
+    container_name: hostname-web
+    labels:
+      com.dokku.coredns-docker/hostname: "myapp,www"
