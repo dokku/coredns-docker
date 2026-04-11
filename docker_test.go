@@ -3,6 +3,7 @@ package docker
 import (
 	"bytes"
 	"context"
+	"errors"
 	golog "log"
 	"net"
 	"os"
@@ -1745,6 +1746,92 @@ func TestServeDNSDebugLogging(t *testing.T) {
 			t.Errorf("expected no PTR records debug log, got: %s", output)
 		}
 	})
+}
+
+// failingResponseWriter is a dns.ResponseWriter that returns an error from
+// WriteMsg. Used to exercise the error branches in ServeDNS that log and
+// increment requestFailedCount when the underlying transport rejects a
+// response.
+type failingResponseWriter struct {
+	test.ResponseWriter
+}
+
+func (w *failingResponseWriter) WriteMsg(*dns.Msg) error {
+	return errWriteMsgFailed
+}
+
+var errWriteMsgFailed = errors.New("simulated WriteMsg failure")
+
+func TestServeDNSWriteMsgErrorPaths(t *testing.T) {
+	d := &Docker{
+		Next:      test.ErrorHandler(),
+		ttl:       DefaultTTL,
+		connected: true,
+		zones:     []string{"docker."},
+		records: map[string][]net.IP{
+			"web.docker.": {net.ParseIP("172.17.0.2")},
+		},
+		srvs: map[string][]srvRecord{},
+		ptrs: map[string][]string{
+			"2.0.17.172.in-addr.arpa.": {"web.docker."},
+		},
+	}
+
+	cases := []struct {
+		name  string
+		qname string
+		qtype uint16
+	}{
+		{"ptr", "2.0.17.172.in-addr.arpa.", dns.TypePTR},
+		{"soa_apex", "docker.", dns.TypeSOA},
+		{"ns_apex", "docker.", dns.TypeNS},
+		{"nxdomain", "nonexistent.docker.", dns.TypeA},
+		{"nodata_wrong_type", "web.docker.", dns.TypeAAAA},
+		{"nodata_no_handler", "web.docker.", dns.TypeMX},
+		{"normal_answer", "web.docker.", dns.TypeA},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			beforeFailed := testutil.ToFloat64(requestFailedCount.WithLabelValues(""))
+
+			m := new(dns.Msg)
+			m.SetQuestion(tc.qname, tc.qtype)
+			w := &failingResponseWriter{}
+
+			if _, err := d.ServeDNS(context.Background(), w, m); err != nil {
+				t.Fatalf("expected ServeDNS to return nil error, got %v", err)
+			}
+
+			afterFailed := testutil.ToFloat64(requestFailedCount.WithLabelValues(""))
+			if afterFailed != beforeFailed+1 {
+				t.Errorf("expected failed_requests_total to increment by 1, before=%f after=%f", beforeFailed, afterFailed)
+			}
+		})
+	}
+}
+
+func TestUnescapeTxtCharString(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		out  string
+	}{
+		{"no backslash fast path", "plain text", "plain text"},
+		{"simple escape", `a\"b`, `a"b`},
+		{"decimal escape", `a\032b`, "a b"},
+		{"trailing lone backslash", `abc\`, `abc\`},
+		{"malformed decimal escape, non-digit after first digit", `a\3xy`, `a\3xy`},
+		{"malformed decimal escape, value > 255", `a\999`, `a\999`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := unescapeTxtCharString(tc.in)
+			if got != tc.out {
+				t.Errorf("unescapeTxtCharString(%q) = %q, want %q", tc.in, got, tc.out)
+			}
+		})
+	}
 }
 
 func TestReadyDebugLogging(t *testing.T) {

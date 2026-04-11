@@ -11,7 +11,10 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/coredns/caddy"
+	_ "github.com/coredns/coredns/core/dnsserver"
 	"github.com/coredns/coredns/plugin/pkg/dnstest"
 	"github.com/coredns/coredns/plugin/pkg/fall"
 	"github.com/coredns/coredns/plugin/test"
@@ -1367,5 +1370,166 @@ func TestIntegrationTXTUnquotedVerbatim(t *testing.T) {
 	d.syncRecords(ctx)
 
 	assertTxtAnswer(t, d, name+".docker.", []string{"key=val;other=val2"})
+}
+
+// TestIntegrationSetup drives setup() end-to-end against a real Docker
+// daemon via a caddy test controller. Covers the body of setup.go:setup,
+// which instantiates a Docker client, pings it, and registers lifecycle
+// hooks with the caddy controller.
+func TestIntegrationSetup(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		shouldErr bool
+	}{
+		{
+			name:      "default",
+			input:     `docker`,
+			shouldErr: false,
+		},
+		{
+			name: "custom options",
+			input: `docker {
+				zone example.org
+				ttl 60
+				label_prefix com.example
+				max_backoff 30s
+			}`,
+			shouldErr: false,
+		},
+		{
+			name: "parse error propagates",
+			input: `docker {
+				unknown_option
+			}`,
+			shouldErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := caddy.NewTestController("dns", tc.input)
+			err := setup(c)
+			if tc.shouldErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+		})
+	}
+}
+
+// TestIntegrationStartEventLoop exercises the startEventLoop happy path
+// and ctx.Done exit branch. The loop syncs records, connects to Docker's
+// event stream, and waits until the supplied context is cancelled.
+func TestIntegrationStartEventLoop(t *testing.T) {
+	d, _ := setupIntegrationDocker(t, nil)
+
+	// Ensure startEventLoop observes at least one container event by
+	// creating a container right after the loop starts.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		d.startEventLoop(ctx)
+		close(done)
+	}()
+
+	// Wait briefly for the loop to establish its Events subscription and
+	// flip d.connected to true. The loop sets connected inside the for
+	// header, after calling Events, so a short poll is sufficient.
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) {
+		d.mu.RLock()
+		connected := d.connected
+		d.mu.RUnlock()
+		if connected {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	d.mu.RLock()
+	if !d.connected {
+		d.mu.RUnlock()
+		t.Fatal("startEventLoop did not mark d.connected within 1s")
+	}
+	d.mu.RUnlock()
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("startEventLoop did not return within 2s after ctx cancel")
+	}
+}
+
+// TestIntegrationStartEventLoopHandlesContainerEvent verifies the event
+// dispatch branch of startEventLoop: when a container starts, the loop
+// receives a message on its events channel and triggers a resync. This
+// covers the `case msg := <-msgs` arm of the select and the `backoff =
+// 1 * time.Second` reset.
+func TestIntegrationStartEventLoopHandlesContainerEvent(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		d.startEventLoop(ctx)
+		close(done)
+	}()
+
+	// Wait for the loop to establish its event subscription.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		d.mu.RLock()
+		connected := d.connected
+		d.mu.RUnlock()
+		if connected {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Create a container. This should fire a "create" / "start" event
+	// which the loop's select will receive.
+	name := testContainerName(t, "evt")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+	}, nil, nil)
+
+	// Poll until the container shows up in d.records, which indicates
+	// that the event-driven resync has completed.
+	fqdn := name + ".docker."
+	recordSeen := false
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		d.mu.RLock()
+		_, recordSeen = d.records[fqdn]
+		d.mu.RUnlock()
+		if recordSeen {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !recordSeen {
+		t.Fatalf("startEventLoop did not resync after container create event; %s missing from records", fqdn)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("startEventLoop did not return within 2s after ctx cancel")
+	}
 }
 
