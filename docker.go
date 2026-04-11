@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"net"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -615,38 +616,67 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 
 			names = append(names, hostnameNames...)
 
+			// Deduplicate names (case-insensitive, preserving insertion order) to
+			// avoid producing duplicate records when a container's name overlaps
+			// with its aliases or DNSNames (common on Docker 25+ user-defined
+			// networks where Aliases and DNSNames contain the container name).
+			seen := make(map[string]bool, len(names))
+			uniqueNames := names[:0]
 			for _, name := range names {
-				if name == "" {
+				lower := strings.ToLower(name)
+				if lower == "" || seen[lower] {
 					continue
 				}
+				seen[lower] = true
+				uniqueNames = append(uniqueNames, name)
+			}
+			names = uniqueNames
+
+			for _, name := range names {
 				for _, zone := range input.Zones {
 					fqdn := strings.ToLower(name + "." + zone)
 					if !strings.HasSuffix(fqdn, ".") {
 						fqdn += "."
 					}
-					newRecords[fqdn] = append(newRecords[fqdn], ip)
-					if arpaErr == nil {
+					// Dedup at the record level to also cover the edge case where
+					// two networks assign the same IP to the same container.
+					if !slices.ContainsFunc(newRecords[fqdn], ip.Equal) {
+						newRecords[fqdn] = append(newRecords[fqdn], ip)
+					}
+					if arpaErr == nil && !slices.Contains(newPtrs[arpa], fqdn) {
 						newPtrs[arpa] = append(newPtrs[arpa], fqdn)
 					}
 
 					if enableWildcard {
 						wildcardFqdn := "*." + fqdn
-						newRecords[wildcardFqdn] = append(newRecords[wildcardFqdn], ip)
+						if !slices.ContainsFunc(newRecords[wildcardFqdn], ip.Equal) {
+							newRecords[wildcardFqdn] = append(newRecords[wildcardFqdn], ip)
+						}
 					}
 
 					for srvKey, port := range containerSrvs {
 						srvName := srvKey + "." + fqdn
-						newSrvs[srvName] = append(newSrvs[srvName], srvRecord{
-							target: fqdn,
-							port:   port,
+						isDupSrv := slices.ContainsFunc(newSrvs[srvName], func(existing srvRecord) bool {
+							return existing.target == fqdn && existing.port == port
 						})
-
-						if enableWildcard {
-							wildcardSrvName := srvKey + ".*." + fqdn
-							newSrvs[wildcardSrvName] = append(newSrvs[wildcardSrvName], srvRecord{
+						if !isDupSrv {
+							newSrvs[srvName] = append(newSrvs[srvName], srvRecord{
 								target: fqdn,
 								port:   port,
 							})
+						}
+
+						if enableWildcard {
+							wildcardSrvName := srvKey + ".*." + fqdn
+							isDupWildcardSrv := slices.ContainsFunc(newSrvs[wildcardSrvName], func(existing srvRecord) bool {
+								return existing.target == fqdn && existing.port == port
+							})
+							if !isDupWildcardSrv {
+								newSrvs[wildcardSrvName] = append(newSrvs[wildcardSrvName], srvRecord{
+									target: fqdn,
+									port:   port,
+								})
+							}
 						}
 					}
 				}

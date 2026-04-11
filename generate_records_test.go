@@ -1784,6 +1784,289 @@ func TestGenerateRecords(t *testing.T) {
 				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker.", "www.docker."}},
 			},
 		},
+		{
+			name: "container name overlaps with alias (dedup)",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+										Aliases:   []string{"web", "api"},
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
+			}{
+				records: map[string][]net.IP{
+					"web.docker.": {net.ParseIP("172.17.0.2")},
+					"api.docker.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker.", "api.docker."}},
+			},
+		},
+		{
+			name: "container name overlaps with DNSNames (dedup)",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+										DNSNames:  []string{"web", "abc123"},
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
+			}{
+				records: map[string][]net.IP{
+					"web.docker.":    {net.ParseIP("172.17.0.2")},
+					"abc123.docker.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker.", "abc123.docker."}},
+			},
+		},
+		{
+			name: "alias and DNSNames both overlap with container name (dedup)",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+										Aliases:   []string{"web"},
+										DNSNames:  []string{"web", "WEB"},
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
+			}{
+				records: map[string][]net.IP{
+					"web.docker.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
+			},
+		},
+		{
+			name: "SRV dedup when name overlaps with alias",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/srv._tcp._http": "8080",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+										Aliases:   []string{"web"},
+										DNSNames:  []string{"web"},
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
+			}{
+				records: map[string][]net.IP{
+					"web.docker.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{
+					"_http._tcp.web.docker.": {{target: "web.docker.", port: 8080}},
+				},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
+			},
+		},
+		{
+			name: "wildcard dedup when name overlaps with alias",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/wildcard":       "true",
+									"com.dokku.coredns-docker/srv._tcp._http": "8080",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+										Aliases:   []string{"web"},
+										DNSNames:  []string{"web"},
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
+			}{
+				records: map[string][]net.IP{
+					"web.docker.":   {net.ParseIP("172.17.0.2")},
+					"*.web.docker.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{
+					"_http._tcp.web.docker.":   {{target: "web.docker.", port: 8080}},
+					"_http._tcp.*.web.docker.": {{target: "web.docker.", port: 8080}},
+				},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
+			},
+		},
+		{
+			name: "multi-network same IP deduplicated",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+									"custom": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				Networks:    []string{"bridge", "custom"},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
+			}{
+				records: map[string][]net.IP{
+					"web.docker.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
+			},
+		},
 	}
 
 	for _, tt := range tests {
