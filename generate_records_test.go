@@ -2067,6 +2067,628 @@ func TestGenerateRecords(t *testing.T) {
 				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
 			},
 		},
+		{
+			name: "host_mode basic A record with explicit host binding",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{},
+							},
+							NetworkSettings: func() *container.NetworkSettings {
+								ns := &container.NetworkSettings{
+									Networks: map[string]*network.EndpointSettings{
+										"bridge": {
+											IPAddress: "172.17.0.2",
+										},
+									},
+								}
+								ns.Ports = nat.PortMap{
+									nat.Port("80/tcp"): []nat.PortBinding{
+										{HostIP: "192.168.1.10", HostPort: "8080"},
+									},
+								}
+								return ns
+							}(),
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+				HostMode:    true,
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
+			}{
+				records: map[string][]net.IP{
+					"web.docker.": {net.ParseIP("192.168.1.10")},
+				},
+				srvs: map[string][]srvRecord{
+					"_tcp._tcp.web.docker.": {
+						{target: "web.docker.", port: 8080},
+					},
+				},
+				ptrs: map[string][]string{},
+			},
+		},
+		{
+			name: "host_mode wildcard host IP 0.0.0.0 normalizes to 127.0.0.1",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{},
+							},
+							NetworkSettings: func() *container.NetworkSettings {
+								ns := &container.NetworkSettings{
+									Networks: map[string]*network.EndpointSettings{
+										"bridge": {
+											IPAddress: "172.17.0.2",
+										},
+									},
+								}
+								ns.Ports = nat.PortMap{
+									nat.Port("80/tcp"): []nat.PortBinding{
+										{HostIP: "0.0.0.0", HostPort: "8080"},
+									},
+								}
+								return ns
+							}(),
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+				HostMode:    true,
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
+			}{
+				records: map[string][]net.IP{
+					"web.docker.": {net.ParseIP("127.0.0.1")},
+				},
+				srvs: map[string][]srvRecord{
+					"_tcp._tcp.web.docker.": {
+						{target: "web.docker.", port: 8080},
+					},
+				},
+				ptrs: map[string][]string{},
+			},
+		},
+		{
+			name: "host_mode wildcard host IP :: normalizes to ::1",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{},
+							},
+							NetworkSettings: func() *container.NetworkSettings {
+								ns := &container.NetworkSettings{
+									Networks: map[string]*network.EndpointSettings{
+										"bridge": {
+											IPAddress: "172.17.0.2",
+										},
+									},
+								}
+								ns.Ports = nat.PortMap{
+									nat.Port("80/tcp"): []nat.PortBinding{
+										{HostIP: "::", HostPort: "8080"},
+									},
+								}
+								return ns
+							}(),
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+				HostMode:    true,
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
+			}{
+				records: map[string][]net.IP{
+					"web.docker.": {net.ParseIP("::1")},
+				},
+				srvs: map[string][]srvRecord{
+					"_tcp._tcp.web.docker.": {
+						{target: "web.docker.", port: 8080},
+					},
+				},
+				ptrs: map[string][]string{},
+			},
+		},
+		{
+			name: "host_mode SRV label translated to host port",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/srv._tcp._http": "80",
+								},
+							},
+							NetworkSettings: func() *container.NetworkSettings {
+								ns := &container.NetworkSettings{
+									Networks: map[string]*network.EndpointSettings{
+										"bridge": {
+											IPAddress: "172.17.0.2",
+										},
+									},
+								}
+								ns.Ports = nat.PortMap{
+									nat.Port("80/tcp"): []nat.PortBinding{
+										{HostIP: "127.0.0.1", HostPort: "18080"},
+									},
+								}
+								return ns
+							}(),
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+				HostMode:    true,
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
+			}{
+				records: map[string][]net.IP{
+					"web.docker.": {net.ParseIP("127.0.0.1")},
+				},
+				srvs: map[string][]srvRecord{
+					"_http._tcp.web.docker.": {
+						{target: "web.docker.", port: 18080},
+					},
+				},
+				ptrs: map[string][]string{},
+			},
+		},
+		{
+			name: "host_mode multiple bindings for same container port",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/srv._tcp._http": "80",
+								},
+							},
+							NetworkSettings: func() *container.NetworkSettings {
+								ns := &container.NetworkSettings{
+									Networks: map[string]*network.EndpointSettings{
+										"bridge": {
+											IPAddress: "172.17.0.2",
+										},
+									},
+								}
+								ns.Ports = nat.PortMap{
+									nat.Port("80/tcp"): []nat.PortBinding{
+										{HostIP: "192.168.1.10", HostPort: "8080"},
+										{HostIP: "192.168.1.11", HostPort: "9090"},
+									},
+								}
+								return ns
+							}(),
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+				HostMode:    true,
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
+			}{
+				records: map[string][]net.IP{
+					// sorted ascending by string() form
+					"web.docker.": {net.ParseIP("192.168.1.10"), net.ParseIP("192.168.1.11")},
+				},
+				srvs: map[string][]srvRecord{
+					"_http._tcp.web.docker.": {
+						{target: "web.docker.", port: 8080},
+						{target: "web.docker.", port: 9090},
+					},
+				},
+				ptrs: map[string][]string{},
+			},
+		},
+		{
+			name: "host_mode SRV label with no matching binding is skipped",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/srv._tcp._http": "80",
+								},
+							},
+							NetworkSettings: func() *container.NetworkSettings {
+								ns := &container.NetworkSettings{
+									Networks: map[string]*network.EndpointSettings{
+										"bridge": {
+											IPAddress: "172.17.0.2",
+										},
+									},
+								}
+								ns.Ports = nat.PortMap{
+									nat.Port("443/tcp"): []nat.PortBinding{
+										{HostIP: "127.0.0.1", HostPort: "8443"},
+									},
+								}
+								return ns
+							}(),
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+				HostMode:    true,
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
+			}{
+				// Label is present so fallback does NOT run; no _http SRV
+				// is emitted and no fallback _tcp._tcp is emitted either.
+				records: map[string][]net.IP{
+					"web.docker.": {net.ParseIP("127.0.0.1")},
+				},
+				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{},
+			},
+		},
+		{
+			name: "host_mode container with no port bindings is skipped",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress: "172.17.0.2",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+				HostMode:    true,
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
+			}{
+				records: map[string][]net.IP{},
+				srvs:    map[string][]srvRecord{},
+				ptrs:    map[string][]string{},
+			},
+		},
+		{
+			name: "host_mode empty HostPort skipped",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{},
+							},
+							NetworkSettings: func() *container.NetworkSettings {
+								ns := &container.NetworkSettings{
+									Networks: map[string]*network.EndpointSettings{
+										"bridge": {
+											IPAddress: "172.17.0.2",
+										},
+									},
+								}
+								ns.Ports = nat.PortMap{
+									nat.Port("80/tcp"): []nat.PortBinding{
+										{HostIP: "127.0.0.1", HostPort: ""},
+									},
+								}
+								return ns
+							}(),
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+				HostMode:    true,
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
+			}{
+				// empty HostPort binding is skipped -> container has no
+				// usable bindings -> no records at all.
+				records: map[string][]net.IP{},
+				srvs:    map[string][]srvRecord{},
+				ptrs:    map[string][]string{},
+			},
+		},
+		{
+			name: "host_mode unions names across multiple networks",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{},
+							},
+							NetworkSettings: func() *container.NetworkSettings {
+								ns := &container.NetworkSettings{
+									Networks: map[string]*network.EndpointSettings{
+										"bridge": {
+											IPAddress: "172.17.0.2",
+											Aliases:   []string{"alpha"},
+										},
+										"custom": {
+											IPAddress: "10.0.0.2",
+											Aliases:   []string{"beta"},
+										},
+									},
+								}
+								ns.Ports = nat.PortMap{
+									nat.Port("80/tcp"): []nat.PortBinding{
+										{HostIP: "127.0.0.1", HostPort: "18080"},
+									},
+								}
+								return ns
+							}(),
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+				Networks:    []string{"bridge", "custom"},
+				HostMode:    true,
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
+			}{
+				records: map[string][]net.IP{
+					"web.docker.":   {net.ParseIP("127.0.0.1")},
+					"alpha.docker.": {net.ParseIP("127.0.0.1")},
+					"beta.docker.":  {net.ParseIP("127.0.0.1")},
+				},
+				srvs: map[string][]srvRecord{
+					"_tcp._tcp.web.docker.":   {{target: "web.docker.", port: 18080}},
+					"_tcp._tcp.alpha.docker.": {{target: "alpha.docker.", port: 18080}},
+					"_tcp._tcp.beta.docker.":  {{target: "beta.docker.", port: 18080}},
+				},
+				ptrs: map[string][]string{},
+			},
+		},
+		{
+			name: "host_mode wildcard label generates wildcard A and SRV",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/wildcard":       "true",
+									"com.dokku.coredns-docker/srv._tcp._http": "80",
+								},
+							},
+							NetworkSettings: func() *container.NetworkSettings {
+								ns := &container.NetworkSettings{
+									Networks: map[string]*network.EndpointSettings{
+										"bridge": {
+											IPAddress: "172.17.0.2",
+										},
+									},
+								}
+								ns.Ports = nat.PortMap{
+									nat.Port("80/tcp"): []nat.PortBinding{
+										{HostIP: "127.0.0.1", HostPort: "18080"},
+									},
+								}
+								return ns
+							}(),
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+				HostMode:    true,
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
+			}{
+				records: map[string][]net.IP{
+					"web.docker.":   {net.ParseIP("127.0.0.1")},
+					"*.web.docker.": {net.ParseIP("127.0.0.1")},
+				},
+				srvs: map[string][]srvRecord{
+					"_http._tcp.web.docker.":   {{target: "web.docker.", port: 18080}},
+					"_http._tcp.*.web.docker.": {{target: "web.docker.", port: 18080}},
+				},
+				ptrs: map[string][]string{},
+			},
+		},
+		{
+			name: "host_mode with HostModePTR emits PTR records",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/wildcard": "true",
+								},
+							},
+							NetworkSettings: func() *container.NetworkSettings {
+								ns := &container.NetworkSettings{
+									Networks: map[string]*network.EndpointSettings{
+										"bridge": {
+											IPAddress: "172.17.0.2",
+										},
+									},
+								}
+								ns.Ports = nat.PortMap{
+									nat.Port("80/tcp"): []nat.PortBinding{
+										{HostIP: "192.168.1.10", HostPort: "8080"},
+									},
+								}
+								return ns
+							}(),
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+				HostMode:    true,
+				HostModePTR: true,
+			},
+			expected: struct {
+				records map[string][]net.IP
+				srvs    map[string][]srvRecord
+				ptrs    map[string][]string
+			}{
+				records: map[string][]net.IP{
+					"web.docker.":   {net.ParseIP("192.168.1.10")},
+					"*.web.docker.": {net.ParseIP("192.168.1.10")},
+				},
+				srvs: map[string][]srvRecord{
+					"_tcp._tcp.web.docker.":   {{target: "web.docker.", port: 8080}},
+					"_tcp._tcp.*.web.docker.": {{target: "web.docker.", port: 8080}},
+				},
+				// Wildcard FQDN must NOT appear in PTR records.
+				ptrs: map[string][]string{
+					mustReverseAddr("192.168.1.10"): {"web.docker."},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {

@@ -10,14 +10,16 @@ import (
 
 func TestParse(t *testing.T) {
 	tests := []struct {
-		input            string
-		shouldErr        bool
-		expectedTTL      uint32
-		expectedZones    []string
-		expectedPrefix   string
-		expectedBackoff  time.Duration
-		expectedNetworks []string
-		expectedFall     fall.F
+		input               string
+		shouldErr           bool
+		expectedTTL         uint32
+		expectedZones       []string
+		expectedPrefix      string
+		expectedBackoff     time.Duration
+		expectedNetworks    []string
+		expectedFall        fall.F
+		expectedHostMode    bool
+		expectedHostModePTR bool
 	}{
 		{
 			`docker`,
@@ -28,6 +30,8 @@ func TestParse(t *testing.T) {
 			60 * time.Second,
 			nil,
 			fall.F{},
+			false,
+			false,
 		},
 		{
 			`docker {
@@ -40,6 +44,8 @@ func TestParse(t *testing.T) {
 			60 * time.Second,
 			nil,
 			fall.F{},
+			false,
+			false,
 		},
 		{
 			`docker {
@@ -52,6 +58,8 @@ func TestParse(t *testing.T) {
 			60 * time.Second,
 			nil,
 			fall.F{},
+			false,
+			false,
 		},
 		{
 			`docker {
@@ -68,6 +76,8 @@ func TestParse(t *testing.T) {
 			30 * time.Second,
 			[]string{"bridge", "my-custom-network"},
 			fall.F{},
+			false,
+			false,
 		},
 		{
 			`docker {
@@ -81,6 +91,8 @@ func TestParse(t *testing.T) {
 			60 * time.Second,
 			nil,
 			fall.F{},
+			false,
+			false,
 		},
 		{
 			`docker {
@@ -93,6 +105,8 @@ func TestParse(t *testing.T) {
 			60 * time.Second,
 			nil,
 			fall.Root,
+			false,
+			false,
 		},
 		{
 			`docker {
@@ -105,6 +119,36 @@ func TestParse(t *testing.T) {
 			60 * time.Second,
 			nil,
 			fall.F{Zones: []string{"example.org.", "test.org."}},
+			false,
+			false,
+		},
+		{
+			`docker {
+				host_mode
+			}`,
+			false,
+			DefaultTTL,
+			[]string{"docker."},
+			"com.dokku.coredns-docker",
+			60 * time.Second,
+			nil,
+			fall.F{},
+			true,
+			false,
+		},
+		{
+			`docker {
+				host_mode ptr
+			}`,
+			false,
+			DefaultTTL,
+			[]string{"docker."},
+			"com.dokku.coredns-docker",
+			60 * time.Second,
+			nil,
+			fall.F{},
+			true,
+			true,
 		},
 		{
 			`docker {
@@ -117,6 +161,8 @@ func TestParse(t *testing.T) {
 			0,
 			nil,
 			fall.F{},
+			false,
+			false,
 		},
 		{
 			`docker {
@@ -129,6 +175,8 @@ func TestParse(t *testing.T) {
 			0,
 			nil,
 			fall.F{},
+			false,
+			false,
 		},
 		{
 			`docker {
@@ -141,6 +189,22 @@ func TestParse(t *testing.T) {
 			0,
 			nil,
 			fall.F{},
+			false,
+			false,
+		},
+		{
+			`docker {
+				host_mode bogus
+			}`,
+			true,
+			0,
+			nil,
+			"",
+			0,
+			nil,
+			fall.F{},
+			false,
+			false,
 		},
 	}
 
@@ -200,6 +264,14 @@ func TestParse(t *testing.T) {
 
 		if !d.Fall.Equal(test.expectedFall) {
 			t.Errorf("Test %d: expected fall %v, got %v", i, test.expectedFall, d.Fall)
+		}
+
+		if d.hostMode != test.expectedHostMode {
+			t.Errorf("Test %d: expected hostMode %t, got %t", i, test.expectedHostMode, d.hostMode)
+		}
+
+		if d.hostModePTR != test.expectedHostModePTR {
+			t.Errorf("Test %d: expected hostModePTR %t, got %t", i, test.expectedHostModePTR, d.hostModePTR)
 		}
 	}
 }
