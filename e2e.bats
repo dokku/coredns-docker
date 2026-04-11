@@ -453,6 +453,157 @@ assert_output_contains() {
   docker rm -f coredns-e2e-cname-noa
 }
 
+@test "[e2e] txt label: simple TXT label resolves at container FQDN" {
+  docker run -d --name coredns-e2e-txt --network bridge \
+    --label "com.dokku.coredns-docker/txt=v=spf1 -all" \
+    alpine sleep 3600
+
+  run wait_for_record "coredns-e2e-txt.${COREDNS_ZONE}" "TXT"
+  assert_success
+  assert_output_contains "v=spf1 -all"
+
+  docker rm -f coredns-e2e-txt
+}
+
+@test "[e2e] txt label: keyed TXT label resolves at keyed FQDN" {
+  docker run -d --name coredns-e2e-txt-keyed --network bridge \
+    --label "com.dokku.coredns-docker/txt._acme-challenge=tok123" \
+    alpine sleep 3600
+
+  run wait_for_record "_acme-challenge.coredns-e2e-txt-keyed.${COREDNS_ZONE}" "TXT"
+  assert_success
+  assert_output_contains "tok123"
+
+  docker rm -f coredns-e2e-txt-keyed
+}
+
+@test "[e2e] txt label: TXT coexists with A record" {
+  docker run -d --name coredns-e2e-txt-a --network bridge \
+    --label "com.dokku.coredns-docker/txt=metadata=1" \
+    alpine sleep 3600
+
+  # The container still gets a normal A record.
+  run wait_for_record "coredns-e2e-txt-a.${COREDNS_ZONE}" "A"
+  assert_success
+  [[ "$output" =~ [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ]]
+
+  # And the TXT label resolves at the same name.
+  run wait_for_record "coredns-e2e-txt-a.${COREDNS_ZONE}" "TXT"
+  assert_success
+  assert_output_contains "metadata=1"
+
+  docker rm -f coredns-e2e-txt-a
+}
+
+@test "[e2e] txt label: TXT NODATA for A-only container" {
+  docker run -d --name coredns-e2e-txt-nodata --network bridge alpine sleep 3600
+
+  # Wait for the A record so we know the container is registered.
+  run wait_for_record "coredns-e2e-txt-nodata.${COREDNS_ZONE}" "A"
+  assert_success
+
+  # A TXT query should return NOERROR with zero answers.
+  run dig +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-txt-nodata.${COREDNS_ZONE}" TXT
+  assert_success
+  assert_output_contains "status: NOERROR"
+  assert_output_contains "ANSWER: 0"
+
+  docker rm -f coredns-e2e-txt-nodata
+}
+
+@test "[e2e] txt label: quoted-form multi-string produces one RR with two strings" {
+  docker run -d --name coredns-e2e-txt-multi --network bridge \
+    --label 'com.dokku.coredns-docker/txt="part1" "part2"' \
+    alpine sleep 3600
+
+  run wait_for_record "coredns-e2e-txt-multi.${COREDNS_ZONE}" "TXT"
+  assert_success
+  # dig +short renders a multi-string TXT RR as `"part1" "part2"`.
+  assert_output_contains "part1"
+  assert_output_contains "part2"
+
+  # Confirm it really is a single RR (ANSWER: 1) and not two RRs.
+  run dig +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-txt-multi.${COREDNS_ZONE}" TXT
+  assert_success
+  assert_output_contains "ANSWER: 1"
+
+  docker rm -f coredns-e2e-txt-multi
+}
+
+@test "[e2e] txt label: quoted-form with escaped quote unescapes to literal quote" {
+  docker run -d --name coredns-e2e-txt-esc --network bridge \
+    --label 'com.dokku.coredns-docker/txt="say \"hi\""' \
+    alpine sleep 3600
+
+  run wait_for_record "coredns-e2e-txt-esc.${COREDNS_ZONE}" "TXT"
+  assert_success
+  # dig +short re-quotes the TXT character-string and re-escapes embedded
+  # double-quotes, so the raw characters say "hi" appear as say \"hi\" in
+  # the output. The important thing is that `say` and the `hi` are present
+  # and there is no second backslash-escape layer from our own parser.
+  assert_output_contains "say"
+  assert_output_contains "hi"
+
+  docker rm -f coredns-e2e-txt-esc
+}
+
+@test "[e2e] txt label: quoted-form with escaped backslash unescapes to single backslash" {
+  docker run -d --name coredns-e2e-txt-bs --network bridge \
+    --label 'com.dokku.coredns-docker/txt="path\\to\\file"' \
+    alpine sleep 3600
+
+  run wait_for_record "coredns-e2e-txt-bs.${COREDNS_ZONE}" "TXT"
+  assert_success
+  # The stored character-string is `path\to\file` (single backslashes).
+  # dig +short re-escapes each backslash, so the visible output contains
+  # `path\\to\\file`. Assert on the substring-level components.
+  assert_output_contains "path"
+  assert_output_contains "to"
+  assert_output_contains "file"
+
+  docker rm -f coredns-e2e-txt-bs
+}
+
+@test "[e2e] txt label: malformed quoted-form falls back to verbatim" {
+  # Leading quote with no terminator — miekg's master-file parser rejects
+  # this and the plugin falls back to storing the raw value.
+  docker run -d --name coredns-e2e-txt-bad --network bridge \
+    --label 'com.dokku.coredns-docker/txt="unterminated' \
+    alpine sleep 3600
+
+  run wait_for_record "coredns-e2e-txt-bad.${COREDNS_ZONE}" "TXT"
+  assert_success
+  # The stored value is the literal 13-byte string `"unterminated`
+  # (leading quote preserved). dig +short wraps the character-string in
+  # quotes and escapes the leading quote as \".
+  assert_output_contains "unterminated"
+
+  docker rm -f coredns-e2e-txt-bad
+}
+
+@test "[e2e] txt label: TXT is suppressed for cname containers" {
+  docker run -d --name coredns-e2e-txt-cname --network bridge \
+    --label "com.dokku.coredns-docker/cname=external.example.com" \
+    --label "com.dokku.coredns-docker/txt=metadata=should-not-appear" \
+    alpine sleep 3600
+
+  # Wait for the CNAME so we know the container is registered.
+  run wait_for_record "coredns-e2e-txt-cname.${COREDNS_ZONE}" "CNAME"
+  assert_success
+
+  # A TXT query against a CNAME name returns the CNAME answer (per
+  # RFC 1034 §3.6.2 — CNAME applies regardless of query type). The
+  # answer section must contain the CNAME target and must NOT contain
+  # the suppressed TXT metadata.
+  run dig +time=2 +tries=1 @127.0.0.1 -p "$COREDNS_PORT" "coredns-e2e-txt-cname.${COREDNS_ZONE}" TXT
+  assert_success
+  assert_output_contains "status: NOERROR"
+  assert_output_contains "external.example.com."
+  [[ ! "$output" =~ should-not-appear ]]
+
+  docker rm -f coredns-e2e-txt-cname
+}
+
 @test "[e2e] network filtering: container on unmonitored network does not resolve" {
   docker network create coredns-e2e-unmonitored 2>/dev/null || true
   docker run -d --name coredns-e2e-filtered --network coredns-e2e-unmonitored alpine sleep 3600

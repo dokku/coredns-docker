@@ -50,8 +50,9 @@ type Docker struct {
 	mu           sync.RWMutex
 	records      map[string][]net.IP
 	srvs         map[string][]srvRecord
-	ptrs         map[string][]string // reverse-arpa FQDN -> container FQDNs
-	cnames       map[string]string   // FQDN -> canonical target (trailing dot)
+	ptrs         map[string][]string   // reverse-arpa FQDN -> container FQDNs
+	cnames       map[string]string     // FQDN -> canonical target (trailing dot)
+	txts         map[string][][]string // FQDN -> list of TXT RRs; each inner slice is one RR's character-strings
 	connected    bool
 	lastSyncTime time.Time
 }
@@ -165,7 +166,8 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	ips, ok := d.records[qname]
 	srvs, srvOk := d.srvs[qname]
 	cnameTarget, cnameOk := d.cnames[qname]
-	if !ok && !srvOk && !cnameOk {
+	txts, txtOk := d.txts[qname]
+	if !ok && !srvOk && !cnameOk && !txtOk {
 		// Try wildcard: replace the first non-underscore label with *
 		// This handles both plain names (foo.web.docker. → *.web.docker.)
 		// and SRV-prefixed names (_http._tcp.foo.web.docker. → _http._tcp.*.web.docker.)
@@ -182,16 +184,17 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 			ips, ok = d.records[wildcardName]
 			srvs, srvOk = d.srvs[wildcardName]
 			cnameTarget, cnameOk = d.cnames[wildcardName]
-			if ok || srvOk || cnameOk {
+			txts, txtOk = d.txts[wildcardName]
+			if ok || srvOk || cnameOk || txtOk {
 				log.Debugf("Wildcard match for %s via %s", qname, wildcardName)
 			}
 		}
 	}
 	isConnected := d.connected
 	d.mu.RUnlock()
-	log.Debugf("Lookup results for %s: A/AAAA records=%d, SRV records=%d, CNAME=%t, connected=%t", qname, len(ips), len(srvs), cnameOk, isConnected)
+	log.Debugf("Lookup results for %s: A/AAAA records=%d, SRV records=%d, CNAME=%t, TXT records=%d, connected=%t", qname, len(ips), len(srvs), cnameOk, len(txts), isConnected)
 
-	if !ok && !srvOk && !cnameOk {
+	if !ok && !srvOk && !cnameOk && !txtOk {
 		if d.Fall.Through(qname) {
 			log.Debugf("No records found for %s, falling through to next plugin", qname)
 			requestFallthroughCount.WithLabelValues(metrics.WithServer(ctx)).Inc()
@@ -259,6 +262,14 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 			})
 			found = true
 		}
+	} else if qtype == dns.TypeTXT {
+		for _, strs := range txts {
+			m.Answer = append(m.Answer, &dns.TXT{
+				Hdr: header,
+				Txt: strs,
+			})
+			found = true
+		}
 	} else {
 		for _, ip := range ips {
 			if qtype == dns.TypeA && ip.To4() != nil {
@@ -278,7 +289,7 @@ func (d *Docker) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg)
 	}
 	log.Debugf("Response for %s %s: %d answer(s)", qname, dns.TypeToString[qtype], len(m.Answer))
 
-	if !found && (qtype == dns.TypeA || qtype == dns.TypeAAAA || qtype == dns.TypeSRV) {
+	if !found && (qtype == dns.TypeA || qtype == dns.TypeAAAA || qtype == dns.TypeSRV || qtype == dns.TypeTXT) {
 		// NODATA
 		log.Debugf("NODATA response for %s type %s: name exists but no matching records", qname, dns.TypeToString[qtype])
 		m.Ns = []dns.RR{d.soa(zone)}
@@ -416,7 +427,7 @@ func (d *Docker) syncRecords(ctx context.Context) {
 	}
 	log.Debugf("Found %d running containers", len(containers))
 
-	newRecords, newSrvs, newPtrs, newCnames := generateRecords(ctx, GenerateRecordsInput{
+	newRecords, newSrvs, newPtrs, newCnames, newTxts := generateRecords(ctx, GenerateRecordsInput{
 		Containers:  containers,
 		Zones:       d.zones,
 		Inspector:   d.client,
@@ -431,6 +442,7 @@ func (d *Docker) syncRecords(ctx context.Context) {
 	d.srvs = newSrvs
 	d.ptrs = newPtrs
 	d.cnames = newCnames
+	d.txts = newTxts
 	d.lastSyncTime = time.Now()
 	d.mu.Unlock()
 	lastSyncTimestamp.Set(float64(time.Now().Unix()))
@@ -439,8 +451,9 @@ func (d *Docker) syncRecords(ctx context.Context) {
 	srvRecordsCount.Set(float64(len(newSrvs)))
 	ptrRecordsCount.Set(float64(len(newPtrs)))
 	cnameRecordsCount.Set(float64(len(newCnames)))
+	txtRecordsCount.Set(float64(len(newTxts)))
 	containersCount.Set(float64(len(containers)))
-	log.Debugf("Synced %d records, %d SRV records, %d PTR records, and %d CNAME records", len(newRecords), len(newSrvs), len(newPtrs), len(newCnames))
+	log.Debugf("Synced %d records, %d SRV records, %d PTR records, %d CNAME records, and %d TXT records", len(newRecords), len(newSrvs), len(newPtrs), len(newCnames), len(newTxts))
 }
 
 // ContainerInspector is an interface for inspecting containers.
@@ -470,12 +483,91 @@ type GenerateRecordsInput struct {
 	HostModePTR bool
 }
 
+// unescapeTxtCharString processes RFC 1035 §5.1 character-string
+// backslash escapes that the miekg/dns master-file parser preserves
+// verbatim in its output. This is applied after dns.NewRR so that the
+// character-strings stored (and later sent on the wire) match what users
+// writing values like `"say \"hi\""` or `"a\032b"` expect.
+//
+// Supported escapes:
+//
+//	\DDD – three-digit decimal byte (0–255)
+//	\X   – literal X for any other single character (covers \\ and \")
+//
+// A trailing lone backslash or a malformed decimal escape is kept
+// verbatim to avoid silently dropping bytes.
+func unescapeTxtCharString(s string) string {
+	if !strings.ContainsRune(s, '\\') {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		if s[i] != '\\' {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		if i+1 >= len(s) {
+			b.WriteByte('\\')
+			i++
+			continue
+		}
+		next := s[i+1]
+		if next >= '0' && next <= '9' {
+			if i+3 < len(s) && s[i+2] >= '0' && s[i+2] <= '9' && s[i+3] >= '0' && s[i+3] <= '9' {
+				val := int(next-'0')*100 + int(s[i+2]-'0')*10 + int(s[i+3]-'0')
+				if val <= 255 {
+					b.WriteByte(byte(val))
+					i += 4
+					continue
+				}
+			}
+			b.WriteByte('\\')
+			i++
+			continue
+		}
+		b.WriteByte(next)
+		i += 2
+	}
+	return b.String()
+}
+
+// parseTxtValue converts a Docker label value into the Txt slice of a
+// dns.TXT RR. If the value starts with a double quote, it is parsed as
+// RFC 1035 master-file TXT rdata via miekg/dns and each resulting
+// character-string is then unescaped per RFC 1035 §5.1 (the miekg
+// parser preserves backslash escapes verbatim, so we post-process).
+// This supports multi-string TXT RRs like `"part1" "part2"` and
+// embedded quotes/backslashes via `\"` and `\\`. On parse failure the
+// raw label value is returned as a single character-string and a debug
+// message is logged. Values that do not start with a double quote are
+// always used verbatim as a single character-string, so ordinary label
+// values containing `=`, `;`, or spaces behave as expected.
+func parseTxtValue(v string) []string {
+	if len(v) > 0 && v[0] == '"' {
+		rr, err := dns.NewRR("dummy. 0 IN TXT " + v)
+		if err == nil {
+			if txt, ok := rr.(*dns.TXT); ok {
+				out := make([]string, len(txt.Txt))
+				for i, s := range txt.Txt {
+					out[i] = unescapeTxtCharString(s)
+				}
+				return out
+			}
+		}
+		log.Debugf("TXT label value %q looked like master-file format but did not parse; using verbatim", v)
+	}
+	return []string{v}
+}
+
 // generateRecords generates the records for the containers.
-func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[string][]net.IP, map[string][]srvRecord, map[string][]string, map[string]string) {
+func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[string][]net.IP, map[string][]srvRecord, map[string][]string, map[string]string, map[string][][]string) {
 	newRecords := make(map[string][]net.IP)
 	newSrvs := make(map[string][]srvRecord)
 	newPtrs := make(map[string][]string)
 	newCnames := make(map[string]string)
+	newTxts := make(map[string][][]string)
 
 	for _, c := range input.Containers {
 		inspect, err := input.Inspector.ContainerInspect(ctx, c.ID)
@@ -588,6 +680,34 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 				}
 				containerCname = lower
 			}
+		}
+
+		// Parse TXT labels. Two forms are supported:
+		//   <prefix>/txt=<value>        -> TXT at the container's own FQDN
+		//   <prefix>/txt.<key>=<value>  -> TXT at <key>.<container>.<zone>
+		// Values starting with `"` are parsed as RFC 1035 master-file TXT
+		// rdata (multiple character-strings, backslash escapes); all other
+		// values are stored verbatim as a single character-string. See
+		// parseTxtValue for details.
+		txtPrefix := input.LabelPrefix + "/txt"
+		if input.LabelPrefix == "" {
+			txtPrefix = "txt"
+		}
+		containerTxts := make(map[string][][]string)
+		for k, v := range inspect.Config.Labels {
+			if k == txtPrefix {
+				containerTxts[""] = append(containerTxts[""], parseTxtValue(v))
+				continue
+			}
+			if !strings.HasPrefix(k, txtPrefix+".") {
+				continue
+			}
+			suffix := strings.TrimPrefix(k, txtPrefix+".")
+			if suffix == "" {
+				continue
+			}
+			key := strings.ToLower(suffix)
+			containerTxts[key] = append(containerTxts[key], parseTxtValue(v))
 		}
 
 		// Add SRV records based on labels
@@ -843,6 +963,25 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 							}
 						}
 					}
+
+					for txtKey, rrs := range containerTxts {
+						var txtFqdn string
+						if txtKey == "" {
+							txtFqdn = fqdn
+						} else {
+							txtFqdn = txtKey + "." + fqdn
+						}
+						newTxts[txtFqdn] = append(newTxts[txtFqdn], rrs...)
+						if enableWildcard {
+							var wildcardTxtFqdn string
+							if txtKey == "" {
+								wildcardTxtFqdn = "*." + fqdn
+							} else {
+								wildcardTxtFqdn = txtKey + ".*." + fqdn
+							}
+							newTxts[wildcardTxtFqdn] = append(newTxts[wildcardTxtFqdn], rrs...)
+						}
+					}
 				}
 			}
 
@@ -898,6 +1037,15 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 				}
 			}
 		}
+
+		// Track which FQDNs we have already emitted TXT records for within
+		// this container, so that a multi-network container does not
+		// emit the same TXT RRs twice for a name that appears on every
+		// network (e.g. the container's base name). TXT records have no
+		// natural dedup key (unlike A/SRV which dedup by IP/port), so we
+		// rely on a per-container set here. Different containers claiming
+		// the same FQDN still accumulate independently.
+		txtEmitted := make(map[string]bool)
 
 		// Generate records for each matching network
 		for _, ne := range networksToProcess {
@@ -985,10 +1133,35 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 							}
 						}
 					}
+
+					for txtKey, rrs := range containerTxts {
+						var txtFqdn string
+						if txtKey == "" {
+							txtFqdn = fqdn
+						} else {
+							txtFqdn = txtKey + "." + fqdn
+						}
+						if !txtEmitted[txtFqdn] {
+							newTxts[txtFqdn] = append(newTxts[txtFqdn], rrs...)
+							txtEmitted[txtFqdn] = true
+						}
+						if enableWildcard {
+							var wildcardTxtFqdn string
+							if txtKey == "" {
+								wildcardTxtFqdn = "*." + fqdn
+							} else {
+								wildcardTxtFqdn = txtKey + ".*." + fqdn
+							}
+							if !txtEmitted[wildcardTxtFqdn] {
+								newTxts[wildcardTxtFqdn] = append(newTxts[wildcardTxtFqdn], rrs...)
+								txtEmitted[wildcardTxtFqdn] = true
+							}
+						}
+					}
 				}
 			}
 		}
 	}
 
-	return newRecords, newSrvs, newPtrs, newCnames
+	return newRecords, newSrvs, newPtrs, newCnames, newTxts
 }

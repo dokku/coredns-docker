@@ -155,6 +155,92 @@ If the `wildcard` label is also set, a wildcard CNAME (`*.name.zone.` → `TARGE
 
 **Use case:** A container proxies traffic to an external service (e.g., a managed database or third-party API), and applications inside your Docker network should resolve the container name to that external host without hard-coding the external domain.
 
+### TXT Records via Docker Labels
+
+To attach TXT records to a container, add labels in one of two formats:
+
+```text
+[LABEL_PREFIX]/txt=[VALUE]
+[LABEL_PREFIX]/txt.[KEY]=[VALUE]
+```
+
+Where:
+
+- `LABEL_PREFIX` is the value of the `label_prefix` option (defaults to `com.dokku.coredns-docker`)
+- The simple form (`txt=...`) attaches a TXT record to the container's own FQDN.
+- The keyed form (`txt.KEY=...`) attaches a TXT record to `KEY.<container>.<zone>`.
+- `VALUE` is the TXT record's text data.
+
+**Example Docker Compose configuration:**
+
+```yaml
+services:
+  web:
+    image: nginx
+    labels:
+      - "com.dokku.coredns-docker/txt=v=spf1 -all"
+      - "com.dokku.coredns-docker/txt.info=version=1.0.0"
+      - "com.dokku.coredns-docker/txt._acme-challenge=deadbeef"
+```
+
+**Example Docker run command:**
+
+```bash
+docker run -d \
+  --name web \
+  --label "com.dokku.coredns-docker/txt=v=spf1 -all" \
+  --label "com.dokku.coredns-docker/txt._acme-challenge=deadbeef" \
+  nginx
+```
+
+This creates TXT records:
+
+- `web.docker.` → `"v=spf1 -all"`
+- `info.web.docker.` → `"version=1.0.0"`
+- `_acme-challenge.web.docker.` → `"deadbeef"`
+
+**Value semantics:**
+
+- Multiple TXT labels on the same container accumulate: each contributes one TXT RR.
+- The keyed segment is lowercased when building the FQDN; `txt.Info=...` and `txt.info=...` produce the same record.
+- An empty label value is valid (e.g. `txt.empty=` yields `"" ` — RFC 1035 permits empty character-strings).
+- TXT values longer than 255 bytes are automatically split into multiple 255-byte `character-string`s on the wire by the DNS library; no manual chunking is required.
+- A bare `txt.` label (trailing dot, no key) is ignored.
+
+**Quoted-form values (multi-string / escape sequences):**
+
+If the label value starts with a double-quote (`"`), it is parsed as RFC 1035 master-file TXT rdata. This lets a single label produce a TXT record containing multiple `character-string`s and lets you embed quotes or backslashes via standard escapes.
+
+Examples:
+
+- `com.dokku.coredns-docker/txt="hello" "world"` → one TXT RR with two character-strings, `"hello"` and `"world"`.
+- `com.dokku.coredns-docker/txt="say \"hi\""` → one TXT RR whose single character-string is `say "hi"` (escaped quotes collapse to literal quotes).
+- `com.dokku.coredns-docker/txt="path\\to\\file"` → one TXT RR whose character-string is `path\to\file` (escaped backslashes collapse to literal backslashes).
+- `com.dokku.coredns-docker/txt="helloA"` and `com.dokku.coredns-docker/txt="hello\065"` produce identical wire bytes (`\065` decimal ⇒ byte `A`).
+
+If the value starts with `"` but is not a well-formed master-file string (for example an unterminated quote), the plugin logs a debug message and falls back to storing the raw label value verbatim as a single character-string.
+
+Label values that do **not** start with `"` bypass master-file parsing entirely, so ordinary values containing `=`, `;`, spaces, or other special characters behave as expected.
+
+**Interaction with other labels:**
+
+- A TXT record is generated for every DNS name the container would normally receive an A/AAAA record for (container name, network aliases, Docker DNS names, Docker Compose `project.service`, and names from the `hostname` label).
+- If the `wildcard` label is also set, wildcard TXT records (`*.name.zone.` and `KEY.*.name.zone.`) are generated alongside the exact-match records.
+- If the `cname` label is set, TXT labels are **ignored** for that container. RFC 1034 §3.6.2 forbids a CNAME name from having other record types, and the plugin treats CNAMEd containers as fully aliased. A TXT query against such a container returns the CNAME record (since a CNAME applies regardless of query type), not the suppressed TXT value.
+
+**Query example:**
+
+```bash
+dig @127.0.0.1 -p 1053 web.docker. TXT
+```
+
+**Use cases:**
+
+- **Local DKIM / SPF fixtures.** Developers testing mail flow can attach `v=spf1` or a DKIM public-key TXT to a mail container and resolve it through the Docker network without touching public DNS.
+- **DNS-01 ACME challenges.** Integration tests that exercise ACME clients can publish a `txt._acme-challenge=<token>` label so the client under test resolves the challenge locally.
+- **Service metadata / version hints.** Small sidecars can expose their build version, git SHA, feature flags, or a short machine-readable config blob via `dig TXT <svc>.docker.`, much like `version.bind`.
+- **Lightweight config discovery.** Publish endpoint URLs or capability strings under keyed TXTs (e.g. `txt.endpoint=grpc://svc:50051`) that clients read once at startup instead of depending on a dedicated config service.
+
 ### Wildcard Records
 
 To enable wildcard DNS resolution for a container, add a label in the format:

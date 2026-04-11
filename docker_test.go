@@ -54,6 +54,19 @@ func TestDocker(t *testing.T) {
 			"5.0.17.172.in-addr.arpa.":                                                      {"multi.docker."},
 			"6.0.17.172.in-addr.arpa.":                                                      {"myproj.mysvc.docker."},
 		},
+		txts: map[string][][]string{
+			// TXT on a name that also has an A record (web.docker.)
+			"web.docker.": {{"v=spf1 -all"}},
+			// Keyed TXT at a TXT-only FQDN — no A record here. Proves that
+			// txtOk participates in the ServeDNS "does this name exist"
+			// check so the query does not fall through to NXDOMAIN.
+			"info.web.docker.": {{"version=1.0.0"}},
+			// Multiple TXT RRs on the same FQDN — response contains N answers.
+			"multi-txt.docker.": {{"one"}, {"two"}},
+			// One TXT RR containing two character-strings — response contains
+			// a single answer whose Txt slice has length 2.
+			"multi-str.docker.": {{"part1", "part2"}},
+		},
 	}
 
 	var cases = []test.Case{
@@ -120,6 +133,81 @@ func TestDocker(t *testing.T) {
 			Rcode: dns.RcodeSuccess,
 			Answer: []dns.RR{
 				test.SRV("_udp._udp.db.docker.	30	IN	SRV	10 10 5432 db.docker."),
+			},
+		},
+		{
+			// TXT query on a name that has both A and TXT records
+			Qname: "web.docker.",
+			Qtype: dns.TypeTXT,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.TXT("web.docker.	30	IN	TXT	\"v=spf1 -all\""),
+			},
+		},
+		{
+			// TXT query on a TXT-only FQDN (no A record). This specifically
+			// verifies that txtOk participates in the ServeDNS existence
+			// check — without it, the name would look nonexistent.
+			Qname: "info.web.docker.",
+			Qtype: dns.TypeTXT,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.TXT("info.web.docker.	30	IN	TXT	\"version=1.0.0\""),
+			},
+		},
+		{
+			// NODATA: A query on a TXT-only FQDN. Name exists (via TXT)
+			// but has no A record, so the response is empty with SOA in
+			// the authority section. Proves the new NODATA condition
+			// correctly handles "name exists only for TXT".
+			Qname:  "info.web.docker.",
+			Qtype:  dns.TypeA,
+			Rcode:  dns.RcodeSuccess,
+			Answer: []dns.RR{},
+			Ns: []dns.RR{
+				test.SOA("docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 0 7200 1800 86400 30"),
+			},
+		},
+		{
+			// Multiple TXT RRs on the same FQDN → multiple answers.
+			Qname: "multi-txt.docker.",
+			Qtype: dns.TypeTXT,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.TXT("multi-txt.docker.	30	IN	TXT	\"one\""),
+				test.TXT("multi-txt.docker.	30	IN	TXT	\"two\""),
+			},
+		},
+		{
+			// One TXT RR with two character-strings → one answer whose
+			// text-rendered form contains both strings.
+			Qname: "multi-str.docker.",
+			Qtype: dns.TypeTXT,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.TXT("multi-str.docker.	30	IN	TXT	\"part1\" \"part2\""),
+			},
+		},
+		{
+			// NODATA: TXT query on a name that has only A records.
+			// Proves TXT is included in the NODATA condition so queries
+			// for unsupported types return NOERROR with SOA, not NXDOMAIN.
+			Qname:  "db.docker.",
+			Qtype:  dns.TypeTXT,
+			Rcode:  dns.RcodeSuccess,
+			Answer: []dns.RR{},
+			Ns: []dns.RR{
+				test.SOA("docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 0 7200 1800 86400 30"),
+			},
+		},
+		{
+			// NXDOMAIN for a TXT query on an entirely unknown name.
+			Qname:  "nope.docker.",
+			Qtype:  dns.TypeTXT,
+			Rcode:  dns.RcodeNameError,
+			Answer: []dns.RR{},
+			Ns: []dns.RR{
+				test.SOA("docker. 30 IN SOA ns.dns.docker. hostmaster.docker. 0 7200 1800 86400 30"),
 			},
 		},
 		{

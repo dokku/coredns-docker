@@ -93,6 +93,7 @@ func setupIntegrationDocker(t *testing.T, networks []string) (*Docker, *client.C
 		srvs:        make(map[string][]srvRecord),
 		ptrs:        make(map[string][]string),
 		cnames:      make(map[string]string),
+		txts:        make(map[string][][]string),
 	}
 
 	return d, cli
@@ -1183,3 +1184,188 @@ func TestIntegrationPTRAfterRemoval(t *testing.T) {
 		t.Errorf("expected SERVFAIL for PTR %s after removal, got rcode %d", arpa, rcode)
 	}
 }
+
+// assertTxtAnswer fatals if the DNS response does not contain a single
+// TXT answer whose Txt slice exactly matches want. Common helper for the
+// TXT integration tests below.
+func assertTxtAnswer(t *testing.T, d *Docker, qname string, want []string) {
+	t.Helper()
+	resp, _, err := queryDNS(t, d, qname, dns.TypeTXT)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s TXT: %v", qname, err)
+	}
+	if resp == nil {
+		t.Fatalf("expected DNS response for %s TXT, got nil", qname)
+	}
+	if len(resp.Answer) != 1 {
+		t.Fatalf("expected exactly one TXT answer for %s, got %d", qname, len(resp.Answer))
+	}
+	txt, ok := resp.Answer[0].(*dns.TXT)
+	if !ok {
+		t.Fatalf("expected TXT record for %s, got %T", qname, resp.Answer[0])
+	}
+	if len(txt.Txt) != len(want) {
+		t.Fatalf("expected %d character-strings for %s, got %d: %#v", len(want), qname, len(txt.Txt), txt.Txt)
+	}
+	for i, w := range want {
+		if txt.Txt[i] != w {
+			t.Errorf("expected Txt[%d]=%q for %s, got %q", i, w, qname, txt.Txt[i])
+		}
+	}
+}
+
+func TestIntegrationTXTRecord(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		Labels: map[string]string{
+			"com.dokku.coredns-docker/txt": "version=1.0.0",
+		},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	assertTxtAnswer(t, d, name+".docker.", []string{"version=1.0.0"})
+}
+
+func TestIntegrationTXTKeyedRecord(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		Labels: map[string]string{
+			"com.dokku.coredns-docker/txt._acme-challenge": "tok123",
+		},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	assertTxtAnswer(t, d, "_acme-challenge."+name+".docker.", []string{"tok123"})
+}
+
+func TestIntegrationTXTQuotedMultiString(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		Labels: map[string]string{
+			// Quoted-form value producing one TXT RR with two character-strings.
+			"com.dokku.coredns-docker/txt": `"part1" "part2"`,
+		},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	assertTxtAnswer(t, d, name+".docker.", []string{"part1", "part2"})
+}
+
+func TestIntegrationTXTQuotedEscapedQuote(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		Labels: map[string]string{
+			// `\"` must be post-processed to a literal `"` in the stored
+			// character-string.
+			"com.dokku.coredns-docker/txt": `"say \"hi\""`,
+		},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	assertTxtAnswer(t, d, name+".docker.", []string{`say "hi"`})
+}
+
+func TestIntegrationTXTQuotedEscapedBackslash(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		Labels: map[string]string{
+			// `\\` must collapse to a single literal backslash.
+			"com.dokku.coredns-docker/txt": `"path\\to\\file"`,
+		},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	assertTxtAnswer(t, d, name+".docker.", []string{`path\to\file`})
+}
+
+func TestIntegrationTXTQuotedDecimalEscape(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		Labels: map[string]string{
+			// `\065` decimal → 'A'.
+			"com.dokku.coredns-docker/txt": `"hello\065world"`,
+		},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	assertTxtAnswer(t, d, name+".docker.", []string{"helloAworld"})
+}
+
+func TestIntegrationTXTQuotedMalformedFallback(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		Labels: map[string]string{
+			// Leading `"` triggers quoted-form parsing, but no closing quote
+			// exists. miekg returns an error and the parser falls back to
+			// storing the raw label value verbatim (including the leading
+			// quote) as a single character-string.
+			"com.dokku.coredns-docker/txt": `"unterminated`,
+		},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	assertTxtAnswer(t, d, name+".docker.", []string{`"unterminated`})
+}
+
+func TestIntegrationTXTUnquotedVerbatim(t *testing.T) {
+	d, cli := setupIntegrationDocker(t, nil)
+	ctx := context.Background()
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+		Labels: map[string]string{
+			// Non-quoted values bypass master-file parsing entirely, so
+			// characters like `=` and `;` pass through untouched.
+			"com.dokku.coredns-docker/txt": "key=val;other=val2",
+		},
+	}, nil, nil)
+
+	d.syncRecords(ctx)
+
+	assertTxtAnswer(t, d, name+".docker.", []string{"key=val;other=val2"})
+}
+
