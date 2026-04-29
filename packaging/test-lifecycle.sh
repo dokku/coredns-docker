@@ -59,7 +59,7 @@ sudo apt-get install -y "$DEB"
 
 echo "==> Files installed"
 assert "test -x /usr/bin/coredns-docker"
-assert "test -f /etc/coredns/Corefile"
+assert "sudo test -f /etc/coredns/Corefile"
 assert "test -f /lib/systemd/system/coredns-docker.service"
 
 echo "==> User/group created and added to docker group"
@@ -97,7 +97,7 @@ refute "test -f /usr/bin/coredns-docker"
 refute "test -f /lib/systemd/system/coredns-docker.service"
 refute "systemctl is-active --quiet coredns-docker.service"
 # Conffile and user are preserved on remove
-assert "test -f /etc/coredns/Corefile"
+assert "sudo test -f /etc/coredns/Corefile"
 assert "getent passwd coredns-docker >/dev/null"
 
 echo "==> apt purge"
