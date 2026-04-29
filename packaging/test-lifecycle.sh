@@ -85,7 +85,7 @@ done
 assert "ss -uln | grep -qF ':1053'"
 
 echo "==> Synthetic SOA query succeeds"
-SOA="$(dig +short @127.0.0.1 -p 1053 docker.localhost SOA)"
+SOA="$(dig +short @127.0.0.1 -p 1053 docker. SOA)"
 echo "    SOA: $SOA"
 assert "[ -n \"$SOA\" ]"
 

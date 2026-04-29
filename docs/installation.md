@@ -28,14 +28,14 @@ sudo apt install coredns-docker
 The package installs:
 
 - `/usr/bin/coredns-docker` -- the binary.
-- `/etc/coredns/Corefile` -- a default Corefile that binds `:1053` and serves the `docker.localhost` zone. Marked as a Debian conffile, so your edits survive upgrades.
+- `/etc/coredns/Corefile` -- a default Corefile that binds `:1053` and serves the `docker.` zone (so `web.docker`, `db.docker`, etc., resolve to the matching containers). Marked as a Debian conffile, so your edits survive upgrades.
 - `/lib/systemd/system/coredns-docker.service` -- a hardened systemd unit ordered after `docker.service` and before `nginx.service` (so reverse-proxy upstreams that resolve via container DNS are reachable before nginx starts).
 
 A dedicated `coredns-docker` system user is created and added to the `docker` group so it can read `/var/run/docker.sock`. The unit is enabled and started automatically, so by the time `apt` returns the service is already serving DNS on port `1053`.
 
 ```bash
 systemctl status coredns-docker
-dig @127.0.0.1 -p 1053 docker.localhost SOA
+dig @127.0.0.1 -p 1053 docker. SOA
 ```
 
 `apt remove coredns-docker` stops the service and removes the binary and unit, but keeps `/etc/coredns/Corefile` (standard Debian conffile behavior). `apt purge coredns-docker` additionally removes `/etc/coredns/`, the `coredns-docker` user, and the `coredns-docker` group, leaving the host as if the package had never been installed.
