@@ -1,0 +1,15 @@
+docker:1053 in-addr.arpa:1053 ip6.arpa:1053 {
+    ready {
+        monitor continuously
+    }
+    errors
+    health
+    log
+    docker {
+        ttl 10
+        label_prefix com.dokku.coredns-docker
+        max_backoff 30s
+    }
+    prometheus :9153
+    cache 30
+}

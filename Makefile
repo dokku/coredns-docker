@@ -105,6 +105,7 @@ build/deb/$(NAME)_$(VERSION)_amd64.deb: build/linux/$(NAME)-amd64
 		&& fpm \
 		--architecture amd64 \
 		--category utils \
+		--depends adduser \
 		--depends net-tools \
 		--depends util-linux \
 		--description "$$PACKAGE_DESCRIPTION" \
@@ -118,7 +119,13 @@ build/deb/$(NAME)_$(VERSION)_amd64.deb: build/linux/$(NAME)-amd64
 		--vendor "" \
 		--version $(VERSION) \
 		--verbose \
+		--config-files /etc/coredns/Corefile \
+		--after-install packaging/postinst \
+		--before-remove packaging/prerm \
+		--after-remove packaging/postrm \
 		build/linux/$(NAME)-amd64=/usr/bin/$(NAME) \
+		packaging/Corefile=/etc/coredns/Corefile \
+		packaging/coredns-docker.service=/lib/systemd/system/coredns-docker.service \
 		LICENSE=/usr/share/doc/$(NAME)/copyright
 
 build/deb/$(NAME)_$(VERSION)_arm64.deb: build/linux/$(NAME)-arm64
@@ -127,6 +134,7 @@ build/deb/$(NAME)_$(VERSION)_arm64.deb: build/linux/$(NAME)-arm64
 		&& fpm \
 		--architecture arm64 \
 		--category utils \
+		--depends adduser \
 		--depends net-tools \
 		--depends util-linux \
 		--description "$$PACKAGE_DESCRIPTION" \
@@ -140,7 +148,13 @@ build/deb/$(NAME)_$(VERSION)_arm64.deb: build/linux/$(NAME)-arm64
 		--vendor "" \
 		--version $(VERSION) \
 		--verbose \
+		--config-files /etc/coredns/Corefile \
+		--after-install packaging/postinst \
+		--before-remove packaging/prerm \
+		--after-remove packaging/postrm \
 		build/linux/$(NAME)-arm64=/usr/bin/$(NAME) \
+		packaging/Corefile=/etc/coredns/Corefile \
+		packaging/coredns-docker.service=/lib/systemd/system/coredns-docker.service \
 		LICENSE=/usr/share/doc/$(NAME)/copyright
 
 .PHONY: build-local

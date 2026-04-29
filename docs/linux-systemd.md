@@ -51,9 +51,35 @@ Both should return the container's IP without specifying a resolver explicitly.
 
 ## 2. Run CoreDNS as a systemd service
 
-Deployed hosts usually want CoreDNS running as a managed service that starts on boot, restarts on failure, and logs to the journal. Here is a minimal unit file.
+Deployed hosts usually want CoreDNS running as a managed service that starts on boot, restarts on failure, and logs to the journal.
 
-Install the binary to `/usr/bin/coredns-docker` (via the `.deb` package or by copying a release binary into place) and your `Corefile` to `/etc/coredns/Corefile`. Create a dedicated system user:
+### If you installed via the Debian package
+
+`apt install coredns-docker` already installs and starts the service for you. The package ships:
+
+- `/lib/systemd/system/coredns-docker.service` -- the unit (same shape as the manual unit below, minus `CAP_NET_BIND_SERVICE` since it binds `:1053`).
+- `/etc/coredns/Corefile` -- a default Corefile, marked as a conffile so your edits survive upgrades.
+- A `coredns-docker` system user/group, with the user added to the `docker` group.
+
+Check status, follow logs, and reload after editing the Corefile:
+
+```bash
+sudo systemctl status coredns-docker
+journalctl -u coredns-docker -f
+sudo systemctl reload coredns-docker   # SIGUSR1, no dropped queries
+```
+
+To customize the unit (for example to add `AmbientCapabilities=CAP_NET_BIND_SERVICE` so you can bind `:53`), use a dropin so your changes are not overwritten on upgrade:
+
+```bash
+sudo systemctl edit coredns-docker
+```
+
+Skip ahead to [Section 1](#1-route-docker-queries-via-systemd-resolved) if you also want `docker.` lookups routed through the service system-wide.
+
+### If you installed from a release binary or built from source
+
+You need to wire the service up yourself. Install the binary to `/usr/bin/coredns-docker` and your `Corefile` to `/etc/coredns/Corefile`. Create a dedicated system user:
 
 ```bash
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin coredns
@@ -80,6 +106,7 @@ Create `/etc/systemd/system/coredns.service`:
 Description=CoreDNS with docker plugin
 Documentation=https://github.com/dokku/coredns-docker
 After=network-online.target docker.service
+Before=nginx.service
 Wants=network-online.target
 Requires=docker.service
 
@@ -106,6 +133,8 @@ WantedBy=multi-user.target
 **Why `CAP_NET_BIND_SERVICE`?** This capability lets an unprivileged process bind to ports below 1024. If your Corefile uses port `53` you need it; if you stick with port `1053` you can remove both the `AmbientCapabilities=` and `CapabilityBoundingSet=` lines.
 
 **Why `Requires=docker.service`?** The plugin fails to start if it cannot ping the Docker daemon, so ordering CoreDNS after `docker.service` avoids a spurious startup failure on boot. `Requires` (as opposed to `After`) ensures systemd starts Docker alongside CoreDNS if it is not already running.
+
+**Why `Before=nginx.service`?** If nginx is configured to upstream by container hostname (e.g., `proxy_pass http://web.docker:8080;`), nginx needs `127.0.0.1:1053` answering before it tries to resolve those upstreams during startup, or it will refuse to start. `Before=` is purely ordering: it pulls nothing in, so the line is a no-op on hosts that do not have nginx installed.
 
 Enable and start the service:
 
