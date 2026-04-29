@@ -1,0 +1,31 @@
+#!/bin/sh
+set -e
+
+if [ -d /run/systemd/system ]; then
+    systemctl --system daemon-reload >/dev/null || true
+fi
+
+if [ "$1" = remove ]; then
+    if [ -x /usr/bin/deb-systemd-helper ]; then
+        deb-systemd-helper mask coredns-docker.service >/dev/null || true
+    fi
+fi
+
+if [ "$1" = purge ]; then
+    if [ -x /usr/bin/deb-systemd-helper ]; then
+        deb-systemd-helper purge coredns-docker.service >/dev/null || true
+        deb-systemd-helper unmask coredns-docker.service >/dev/null || true
+    fi
+
+    rm -rf /etc/coredns
+
+    if getent passwd coredns-docker >/dev/null; then
+        deluser --system coredns-docker >/dev/null || true
+    fi
+
+    if getent group coredns-docker >/dev/null; then
+        delgroup --system coredns-docker >/dev/null || true
+    fi
+fi
+
+exit 0

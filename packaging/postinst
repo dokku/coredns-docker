@@ -1,0 +1,56 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        if ! getent group coredns-docker >/dev/null; then
+            addgroup --system coredns-docker
+        fi
+
+        if ! getent passwd coredns-docker >/dev/null; then
+            adduser --system \
+                --no-create-home \
+                --ingroup coredns-docker \
+                --shell /usr/sbin/nologin \
+                coredns-docker
+        fi
+
+        if getent group docker >/dev/null; then
+            adduser coredns-docker docker >/dev/null || true
+        fi
+
+        if [ -d /etc/coredns ]; then
+            chown root:coredns-docker /etc/coredns
+            chmod 0750 /etc/coredns
+        fi
+
+        if [ -f /etc/coredns/Corefile ]; then
+            chown root:coredns-docker /etc/coredns/Corefile
+            chmod 0640 /etc/coredns/Corefile
+        fi
+        ;;
+esac
+
+if [ -d /run/systemd/system ]; then
+    systemctl --system daemon-reload >/dev/null || true
+fi
+
+if [ -x /usr/bin/deb-systemd-helper ]; then
+    deb-systemd-helper unmask coredns-docker.service >/dev/null || true
+
+    if deb-systemd-helper --quiet was-enabled coredns-docker.service; then
+        deb-systemd-helper enable coredns-docker.service >/dev/null || true
+    else
+        deb-systemd-helper update-state coredns-docker.service >/dev/null || true
+    fi
+fi
+
+if [ -d /run/systemd/system ]; then
+    if [ -n "$2" ]; then
+        deb-systemd-invoke try-restart coredns-docker.service >/dev/null || true
+    else
+        deb-systemd-invoke start coredns-docker.service >/dev/null || true
+    fi
+fi
+
+exit 0

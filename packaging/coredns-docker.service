@@ -1,0 +1,24 @@
+[Unit]
+Description=CoreDNS with docker plugin
+Documentation=https://github.com/dokku/coredns-docker
+After=network-online.target docker.service
+Before=nginx.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=coredns-docker
+Group=coredns-docker
+ExecStart=/usr/bin/coredns-docker -conf /etc/coredns/Corefile
+ExecReload=/bin/kill -SIGUSR1 $MAINPID
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=1048576
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
