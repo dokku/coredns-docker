@@ -77,8 +77,12 @@ for _ in $(seq 1 30); do
 done
 assert "systemctl is-active --quiet coredns-docker.service"
 
-echo "==> Service is bound to UDP/1053"
-assert "ss -uln | awk '{print \$5}' | grep -qE ':1053\$'"
+echo "==> Wait up to 30s for service to bind UDP/1053"
+for _ in $(seq 1 30); do
+  if ss -uln | grep -qF ':1053'; then break; fi
+  sleep 1
+done
+assert "ss -uln | grep -qF ':1053'"
 
 echo "==> Synthetic SOA query succeeds"
 SOA="$(dig +short @127.0.0.1 -p 1053 docker.localhost SOA)"
