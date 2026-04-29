@@ -8,8 +8,8 @@ set -euo pipefail
 DEB="${1:?usage: $0 path/to/coredns-docker.deb}"
 
 if [ ! -f "$DEB" ]; then
-    echo "deb not found: $DEB" >&2
-    exit 2
+  echo "deb not found: $DEB" >&2
+  exit 2
 fi
 
 # Convert to absolute path - apt-get insists on a leading "./" or "/" for a local file.
@@ -18,25 +18,33 @@ DEB="$(readlink -f "$DEB")"
 export DEBIAN_FRONTEND=noninteractive
 
 dump_logs() {
-    echo "==== service status ===="
-    systemctl --no-pager status coredns-docker.service || true
-    echo "==== service journal ===="
-    journalctl --no-pager -u coredns-docker.service || true
+  echo "==== service status ===="
+  systemctl --no-pager status coredns-docker.service || true
+  echo "==== service journal ===="
+  journalctl --no-pager -u coredns-docker.service || true
 }
-trap 'rc=$?; if [ $rc -ne 0 ]; then dump_logs; fi; exit $rc' EXIT
+
+on_exit() {
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    dump_logs
+  fi
+  exit "$rc"
+}
+trap on_exit EXIT
 
 assert() {
-    if ! eval "$1"; then
-        echo "ASSERT FAILED: $1" >&2
-        exit 1
-    fi
+  if ! eval "$1"; then
+    echo "ASSERT FAILED: $1" >&2
+    exit 1
+  fi
 }
 
 refute() {
-    if eval "$1"; then
-        echo "REFUTE FAILED (expected to fail): $1" >&2
-        exit 1
-    fi
+  if eval "$1"; then
+    echo "REFUTE FAILED (expected to fail): $1" >&2
+    exit 1
+  fi
 }
 
 echo "==> Preflight: docker daemon must be active"
@@ -64,8 +72,8 @@ assert "systemctl is-enabled --quiet coredns-docker.service"
 
 echo "==> Wait up to 30s for service to become active"
 for _ in $(seq 1 30); do
-    if systemctl is-active --quiet coredns-docker.service; then break; fi
-    sleep 1
+  if systemctl is-active --quiet coredns-docker.service; then break; fi
+  sleep 1
 done
 assert "systemctl is-active --quiet coredns-docker.service"
 
