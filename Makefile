@@ -108,6 +108,7 @@ build/deb/$(NAME)_$(VERSION)_amd64.deb: build/linux/$(NAME)-amd64
 		--depends adduser \
 		--depends net-tools \
 		--depends util-linux \
+		--deb-pre-depends "docker-engine-cs | docker-engine | docker-io | docker.io | docker-ce | docker-ee | moby-engine" \
 		--description "$$PACKAGE_DESCRIPTION" \
 		--input-type dir \
 		--license 'MIT License' \
@@ -137,6 +138,7 @@ build/deb/$(NAME)_$(VERSION)_arm64.deb: build/linux/$(NAME)-arm64
 		--depends adduser \
 		--depends net-tools \
 		--depends util-linux \
+		--deb-pre-depends "docker-engine-cs | docker-engine | docker-io | docker.io | docker-ce | docker-ee | moby-engine" \
 		--description "$$PACKAGE_DESCRIPTION" \
 		--input-type dir \
 		--license 'MIT License' \
