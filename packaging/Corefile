@@ -9,6 +9,9 @@ docker:1053 in-addr.arpa:1053 ip6.arpa:1053 {
         ttl 10
         label_prefix com.dokku.coredns-docker
         max_backoff 30s
+        name_from_labels "{{label \"com.dokku.app-name\"}}.{{label \"com.dokku.process-type\"}}"
+        name_from_labels "{{label \"com.dokku.app-name\"}}"
+        name_from_labels "{{label \"com.docker.compose.project\"}}.{{label \"com.docker.compose.service\"}}"
     }
     prometheus :9153
     cache 30

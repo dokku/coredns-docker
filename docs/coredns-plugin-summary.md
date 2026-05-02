@@ -27,6 +27,7 @@ docker {
     networks NETWORK [NETWORK...]
     fallthrough [ZONES...]
     host_mode [ptr]
+    name_from_labels TEMPLATE
 }
 ~~~
 
@@ -37,6 +38,7 @@ docker {
 * `networks` **NETWORK [NETWORK...]** whitelists the Docker networks the plugin serves. Containers attached only to non-whitelisted networks are ignored. If omitted, every network is served.
 * `fallthrough` **[ZONES...]** If a query for a record in the zones for which the plugin is authoritative results in NXDOMAIN, normally that is what the response will be. However, if this option is specified, the query will instead be passed on down the plugin chain. If **[ZONES...]** is omitted, fallthrough happens for all zones for which the plugin is authoritative.
 * `host_mode` **[ptr]** resolves container names to the host IP and host port of each container's port bindings instead of the container's internal network IP. With the optional `ptr` flag, PTR records are also generated for host IPs (off by default to reduce reverse-lookup noise).
+* `name_from_labels` **TEMPLATE** registers an additional name source from a Go `text/template`. The directive is repeatable; each line is one template, evaluated independently per container. Templates can call `label "KEY"` (returns the value or aborts the template), `labelOr "KEY" "DEFAULT"`, and `hasLabel "KEY"`. A template that aborts contributes no name for that container. Multiple templates collapse onto the same FQDN when they render to identical strings, producing standard multi-A round-robin responses without per-container labels.
 
 ## Name Sources
 
@@ -45,7 +47,8 @@ Without any labels, every container automatically receives A/AAAA records for:
 * the container name set via `docker run --name` or `container_name:` in Compose,
 * Docker network aliases,
 * Docker-internal DNS names,
-* the `project.service` pair for containers managed by Docker Compose.
+* the `project.service` pair for containers managed by Docker Compose,
+* any names produced by `name_from_labels` templates configured in the Corefile (the shipped `packaging/Corefile` enables Dokku `<app>.<process>` and `<app>` plus the Compose `<project>.<service>` collapse).
 
 PTR records pointing back to these names are generated for both IPv4 (`in-addr.arpa.`) and IPv6 (`ip6.arpa.`) reverse zones. To serve reverse lookups the reverse zones must be listed in the CoreDNS server block so that CoreDNS delivers PTR queries to the plugin:
 

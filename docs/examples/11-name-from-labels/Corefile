@@ -1,0 +1,9 @@
+docker.:1053 in-addr.arpa:1053 ip6.arpa:1053 {
+    errors
+    log
+    docker {
+        zone docker.
+        name_from_labels "{{label \"com.dokku.app-name\"}}.{{label \"com.dokku.process-type\"}}"
+        name_from_labels "{{label \"com.dokku.app-name\"}}"
+    }
+}

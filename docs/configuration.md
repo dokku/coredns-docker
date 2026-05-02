@@ -120,6 +120,61 @@ Containers attached only to networks **not** in the list are ignored, even if th
 
 See [examples/08-network-filtering](examples/08-network-filtering) for a runnable setup.
 
+## `name_from_labels`
+
+Synthesize additional DNS names for each container from its Docker labels. The directive is repeatable -- each line is one Go [`text/template`](https://pkg.go.dev/text/template) body, evaluated independently per container, and any non-empty result joins the container's name set alongside the container name, network aliases, DNSNames, Compose `project.service`, and `hostname` labels. The existing case-insensitive name dedup applies, so multiple templates that resolve to the same string per container are folded into one.
+
+**Why this exists:** Docker's built-in default names (container name, network aliases, DNSNames, Compose `project.service`) cover many setups, but orchestrators like Dokku, Nomad, and custom schedulers stamp their own labels on every container. Without `name_from_labels`, you would have to add a separate `com.dokku.coredns-docker/hostname` label to every container to get a stable, multi-instance DNS name. With it, three containers sharing a label combination automatically collapse onto a single multi-A record name -- producing standard DNS round-robin without per-container configuration.
+
+The shipped `packaging/Corefile` already includes three defaults:
+
+```text
+docker {
+    zone docker.
+    name_from_labels "{{label \"com.dokku.app-name\"}}.{{label \"com.dokku.process-type\"}}"
+    name_from_labels "{{label \"com.dokku.app-name\"}}"
+    name_from_labels "{{label \"com.docker.compose.project\"}}.{{label \"com.docker.compose.service\"}}"
+}
+```
+
+Out of the box this turns three Dokku web dynos with the same `com.dokku.app-name=docs` and `com.dokku.process-type=web` labels into a single `docs.web.<zone>.` RRSet of three IPs, plus `docs.<zone>.` covering every container in the same app, plus the long-standing Compose `project.service` collapse for `docker compose up --scale`.
+
+### Template helpers
+
+Each template runs against a small data context. Most operators reach for one of these custom funcs because Docker label keys typically contain dots and cannot be reached via Go template field access:
+
+| Helper | Effect |
+| --- | --- |
+| `label "KEY"` | Returns the label value (with surrounding whitespace trimmed). If the label is missing or empty, the template aborts and contributes no name for this container. |
+| `labelOr "KEY" "DEFAULT"` | Returns the label value, or the supplied default if the label is missing or empty. Useful for fallbacks that should still render. |
+| `hasLabel "KEY"` | Boolean for use inside `{{if}}` or `{{with}}` blocks. |
+
+`.Labels` (the full map), `.Name` (container name without leading slash), and `.ID` (the container ID) are also available on the data context for advanced use.
+
+### Quoting
+
+The Caddyfile lexer the Corefile uses recognizes only double-quoted strings. Because the template body itself contains the double-quoted label keys, the outer string must escape them. Both Dokku examples above are equivalent to writing this template body:
+
+```text
+{{label "com.dokku.app-name"}}.{{label "com.dokku.process-type"}}
+```
+
+### When a template aborts
+
+If `label "KEY"` is called for a label the container does not carry (or whose value is empty after trimming), the template execution aborts with a `template: ... missing or empty` error. The plugin catches this and treats it as "this template contributes no name for this container." Other templates and other name sources are unaffected. This is also the safest way to scope a template to a subset of containers: reference the labels that mark the subset, and the plugin will skip every container that does not carry them.
+
+### Conditionals and fallbacks
+
+For more complex behavior, combine the helpers with standard Go template control flow. For example, to register a container under both `<app>.<process>` and `<app>` when `process-type` is set, but just `<app>` when it is not:
+
+```text
+name_from_labels "{{if hasLabel \"com.dokku.process-type\"}}{{label \"com.dokku.app-name\"}}.{{label \"com.dokku.process-type\"}}{{else}}{{label \"com.dokku.app-name\"}}{{end}}"
+```
+
+### Upgrade note for the package
+
+Debian packages do not overwrite the operator's existing `/etc/coredns/Corefile` (it is a conffile). On an upgrade from a pre-`name_from_labels` version, your existing Corefile is preserved and you do not get the new defaults automatically. Paste the three lines above into your `docker { ... }` block to opt in.
+
 ## `fallthrough`
 
 Instead of returning NXDOMAIN for unmatched names, pass the query to the next plugin in the chain. Without arguments, fallthrough applies to every unmatched name. With arguments, it applies only to the listed zones.

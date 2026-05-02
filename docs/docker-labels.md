@@ -10,8 +10,11 @@ Before you touch any labels, the plugin already creates A/AAAA records for the n
 - Docker **network aliases** (`--network-alias`).
 - The **DNS names** Docker itself exposes via the Docker engine.
 - The Docker Compose `project.service` pair (e.g., `myproject.web` when Compose stack `myproject` has a service named `web`).
+- Any names produced by [`name_from_labels`](configuration.md#name_from_labels) templates configured in the Corefile. The shipped `packaging/Corefile` includes templates for Dokku (`<app>.<process>` and `<app>`) and Compose (`<project>.<service>`), so a `docker run` carrying the matching labels gets those names without any plugin labels of your own.
 
 All of those names become A/AAAA records under your configured zone. PTR records for the reverse lookup are created as well (see [Configuration: reverse zones](configuration.md#reverse-zones-ptr-records)). You only need labels when you want records the default name set does not cover, or when you want SRV/TXT/CNAME/wildcard records.
+
+When the same name comes from more than one container -- for example, three containers all carrying the same Compose `service`, the same `--network-alias`, or the same Dokku `app-name` + `process-type` pair -- the plugin returns all of their IPs in a single multi-A response. Clients see this as standard DNS round-robin.
 
 ## `hostname` labels
 
