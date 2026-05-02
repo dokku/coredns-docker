@@ -126,18 +126,18 @@ Synthesize additional DNS names for each container from its Docker labels. The d
 
 **Why this exists:** Docker's built-in default names (container name, network aliases, DNSNames, Compose `project.service`) cover many setups, but orchestrators like Dokku, Nomad, and custom schedulers stamp their own labels on every container. Without `name_from_labels`, you would have to add a separate `com.dokku.coredns-docker/hostname` label to every container to get a stable, multi-instance DNS name. With it, three containers sharing a label combination automatically collapse onto a single multi-A record name -- producing standard DNS round-robin without per-container configuration.
 
-The shipped `packaging/Corefile` already includes three defaults:
+The shipped `packaging/Corefile` already includes three defaults, each gated on `hasLabel` so containers that do not carry the referenced labels render empty (and are cleanly skipped) instead of producing a debug log line per template per sync:
 
 ```text
 docker {
     zone docker.
-    name_from_labels "{{label \"com.dokku.app-name\"}}.{{label \"com.dokku.process-type\"}}"
-    name_from_labels "{{label \"com.dokku.app-name\"}}"
-    name_from_labels "{{label \"com.docker.compose.project\"}}.{{label \"com.docker.compose.service\"}}"
+    name_from_labels "{{if and (hasLabel \"com.dokku.app-name\") (hasLabel \"com.dokku.process-type\")}}{{label \"com.dokku.app-name\"}}.{{label \"com.dokku.process-type\"}}{{end}}"
+    name_from_labels "{{if hasLabel \"com.dokku.app-name\"}}{{label \"com.dokku.app-name\"}}{{end}}"
+    name_from_labels "{{if and (hasLabel \"com.docker.compose.project\") (hasLabel \"com.docker.compose.service\")}}{{label \"com.docker.compose.project\"}}.{{label \"com.docker.compose.service\"}}{{end}}"
 }
 ```
 
-Out of the box this turns three Dokku web dynos with the same `com.dokku.app-name=docs` and `com.dokku.process-type=web` labels into a single `docs.web.<zone>.` RRSet of three IPs, plus `docs.<zone>.` covering every container in the same app, plus the long-standing Compose `project.service` collapse for `docker compose up --scale`.
+Out of the box this turns three Dokku web dynos with the same `com.dokku.app-name=docs` and `com.dokku.process-type=web` labels into a single `docs.web.<zone>.` RRSet of three IPs, plus `docs.<zone>.` covering every container in the same app, plus the long-standing Compose `project.service` collapse for `docker compose up --scale`. Containers that carry none of these labels (e.g., a stock `nginx:alpine`) render empty for every shipped template and contribute nothing extra.
 
 ### Template helpers
 
@@ -161,7 +161,7 @@ The Caddyfile lexer the Corefile uses recognizes only double-quoted strings. Bec
 
 ### When a template aborts
 
-If `label "KEY"` is called for a label the container does not carry (or whose value is empty after trimming), the template execution aborts with a `template: ... missing or empty` error. The plugin catches this and treats it as "this template contributes no name for this container." Other templates and other name sources are unaffected. This is also the safest way to scope a template to a subset of containers: reference the labels that mark the subset, and the plugin will skip every container that does not carry them.
+If `label "KEY"` is called for a label the container does not carry (or whose value is empty after trimming), the template execution aborts with a `template: ... missing or empty` error. The plugin catches this and treats it as "this template contributes no name for this container." Other templates and other name sources are unaffected. This is one safe way to scope a template to a subset of containers, but on a host with many containers that do not carry the referenced labels, every aborted execution emits a debug log line per template per sync. To avoid that noise, the shipped defaults gate each `label` call on `hasLabel` so the template renders empty (which the plugin filters silently) instead of aborting. Choose either pattern based on whether you want the abort visibility or the silent-skip cleanliness.
 
 ### Conditionals and fallbacks
 
