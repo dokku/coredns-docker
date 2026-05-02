@@ -987,3 +987,175 @@ EOF
   wait "$HOSTMODE_PID" 2>/dev/null || true
   rm -f "$HOSTMODE_COREFILE"
 }
+
+@test "[e2e] name_from_labels: shared dokku labels produce a multi-IP RRSet" {
+  local NFL_COREFILE
+  NFL_COREFILE="$(mktemp /tmp/Corefile.nfl.XXXXXX)"
+  local NFL_PORT=15359
+  cat >"$NFL_COREFILE" <<EOF
+docker.localhost:${NFL_PORT} in-addr.arpa:${NFL_PORT} ip6.arpa:${NFL_PORT} {
+    log
+    errors
+    debug
+    docker {
+        zone docker.localhost
+        ttl 10
+        networks bridge ${TEST_NETWORK}
+        name_from_labels "{{label \"com.dokku.app-name\"}}.{{label \"com.dokku.process-type\"}}"
+        name_from_labels "{{label \"com.dokku.app-name\"}}"
+    }
+}
+EOF
+
+  "$COREDNS_BINARY" -conf "$NFL_COREFILE" &
+  local NFL_PID=$!
+
+  local retries=20 i=0
+  while [ "$i" -lt "$retries" ]; do
+    if dig +short +time=1 +tries=1 @127.0.0.1 -p "$NFL_PORT" version.bind chaos txt >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+
+  docker run -d --name coredns-e2e-nfl-web1 --network bridge \
+    --label "com.dokku.app-name=docs" \
+    --label "com.dokku.process-type=web" \
+    alpine sleep 3600
+  docker run -d --name coredns-e2e-nfl-web2 --network bridge \
+    --label "com.dokku.app-name=docs" \
+    --label "com.dokku.process-type=web" \
+    alpine sleep 3600
+  docker run -d --name coredns-e2e-nfl-web3 --network bridge \
+    --label "com.dokku.app-name=docs" \
+    --label "com.dokku.process-type=web" \
+    alpine sleep 3600
+
+  local ip1 ip2 ip3
+  ip1=$(docker inspect -f '{{.NetworkSettings.Networks.bridge.IPAddress}}' coredns-e2e-nfl-web1)
+  ip2=$(docker inspect -f '{{.NetworkSettings.Networks.bridge.IPAddress}}' coredns-e2e-nfl-web2)
+  ip3=$(docker inspect -f '{{.NetworkSettings.Networks.bridge.IPAddress}}' coredns-e2e-nfl-web3)
+
+  # Wait until docs.web.docker.localhost has at least one record before
+  # asserting on the count.
+  run wait_for_record_on_port "docs.web.docker.localhost" "A" "$NFL_PORT"
+  assert_success
+
+  # Re-query and assert all three IPs are present in the RRSet.
+  local merged_output
+  retries=20
+  i=0
+  while [ "$i" -lt "$retries" ]; do
+    merged_output=$(dig +short +time=1 +tries=1 @127.0.0.1 -p "$NFL_PORT" "docs.web.docker.localhost" A 2>/dev/null)
+    local count
+    count=$(echo "$merged_output" | grep -c '^[0-9]' || true)
+    if [ "$count" = "3" ]; then
+      break
+    fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+
+  echo "merged_output: $merged_output"
+  [[ "$merged_output" == *"$ip1"* ]] || flunk "missing $ip1 in docs.web RRSet: $merged_output"
+  [[ "$merged_output" == *"$ip2"* ]] || flunk "missing $ip2 in docs.web RRSet: $merged_output"
+  [[ "$merged_output" == *"$ip3"* ]] || flunk "missing $ip3 in docs.web RRSet: $merged_output"
+
+  # The single-label template (just app-name) collects the same set.
+  retries=20
+  i=0
+  while [ "$i" -lt "$retries" ]; do
+    merged_output=$(dig +short +time=1 +tries=1 @127.0.0.1 -p "$NFL_PORT" "docs.docker.localhost" A 2>/dev/null)
+    local count
+    count=$(echo "$merged_output" | grep -c '^[0-9]' || true)
+    if [ "$count" = "3" ]; then
+      break
+    fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+
+  [[ "$merged_output" == *"$ip1"* ]] || flunk "missing $ip1 in docs RRSet: $merged_output"
+  [[ "$merged_output" == *"$ip2"* ]] || flunk "missing $ip2 in docs RRSet: $merged_output"
+  [[ "$merged_output" == *"$ip3"* ]] || flunk "missing $ip3 in docs RRSet: $merged_output"
+
+  # Per-container names still resolve to exactly one IP each.
+  run wait_for_record_on_port "coredns-e2e-nfl-web1.docker.localhost" "A" "$NFL_PORT"
+  assert_success
+  assert_equal "$ip1" "$output"
+
+  # Cleanup
+  docker rm -f coredns-e2e-nfl-web1 coredns-e2e-nfl-web2 coredns-e2e-nfl-web3
+  kill "$NFL_PID" 2>/dev/null || true
+  wait "$NFL_PID" 2>/dev/null || true
+  rm -f "$NFL_COREFILE"
+}
+
+@test "[e2e] name_from_labels: container missing referenced label is skipped" {
+  local NFL_COREFILE
+  NFL_COREFILE="$(mktemp /tmp/Corefile.nfl.XXXXXX)"
+  local NFL_PORT=15360
+  cat >"$NFL_COREFILE" <<EOF
+docker.localhost:${NFL_PORT} in-addr.arpa:${NFL_PORT} ip6.arpa:${NFL_PORT} {
+    log
+    errors
+    debug
+    docker {
+        zone docker.localhost
+        ttl 10
+        networks bridge ${TEST_NETWORK}
+        name_from_labels "{{label \"com.dokku.app-name\"}}.{{label \"com.dokku.process-type\"}}"
+    }
+}
+EOF
+
+  "$COREDNS_BINARY" -conf "$NFL_COREFILE" &
+  local NFL_PID=$!
+
+  local retries=20 i=0
+  while [ "$i" -lt "$retries" ]; do
+    if dig +short +time=1 +tries=1 @127.0.0.1 -p "$NFL_PORT" version.bind chaos txt >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+
+  # Container with both labels — should register under api.web.docker.localhost.
+  docker run -d --name coredns-e2e-nfl-skipfull --network bridge \
+    --label "com.dokku.app-name=api" \
+    --label "com.dokku.process-type=web" \
+    alpine sleep 3600
+
+  # Container with only one of the labels — should NOT contribute to any
+  # templated FQDN.
+  docker run -d --name coredns-e2e-nfl-skipone --network bridge \
+    --label "com.dokku.app-name=api" \
+    alpine sleep 3600
+
+  local ip_full
+  ip_full=$(docker inspect -f '{{.NetworkSettings.Networks.bridge.IPAddress}}' coredns-e2e-nfl-skipfull)
+
+  run wait_for_record_on_port "api.web.docker.localhost" "A" "$NFL_PORT"
+  assert_success
+  assert_equal "$ip_full" "$output"
+
+  # Confirm that api.web.docker.localhost does not also include the
+  # one-labeled container's IP. It should be a single-IP answer.
+  run dig +short +time=2 +tries=1 @127.0.0.1 -p "$NFL_PORT" "api.web.docker.localhost" A
+  assert_success
+  local count
+  count=$(echo "$output" | grep -c '^[0-9]' || true)
+  assert_equal "1" "$count"
+
+  # Per-container record for the one-labeled container still resolves.
+  run wait_for_record_on_port "coredns-e2e-nfl-skipone.docker.localhost" "A" "$NFL_PORT"
+  assert_success
+
+  # Cleanup
+  docker rm -f coredns-e2e-nfl-skipfull coredns-e2e-nfl-skipone
+  kill "$NFL_PID" 2>/dev/null || true
+  wait "$NFL_PID" 2>/dev/null || true
+  rm -f "$NFL_COREFILE"
+}

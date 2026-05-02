@@ -27,3 +27,6 @@ validation/*
 
 # Local test binary
 coredns-docker-local
+
+# Scratch space
+tmp/

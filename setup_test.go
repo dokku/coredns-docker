@@ -373,3 +373,78 @@ func TestParse(t *testing.T) {
 		}
 	}
 }
+
+func TestParseNameFromLabels(t *testing.T) {
+	tests := []struct {
+		name              string
+		input             string
+		shouldErr         bool
+		expectedTemplates int
+	}{
+		{
+			name: "single template",
+			input: `docker {
+				name_from_labels "{{label \"com.dokku.app-name\"}}"
+			}`,
+			shouldErr:         false,
+			expectedTemplates: 1,
+		},
+		{
+			name: "multiple templates accumulate",
+			input: `docker {
+				name_from_labels "{{label \"com.dokku.app-name\"}}.{{label \"com.dokku.process-type\"}}"
+				name_from_labels "{{label \"com.dokku.app-name\"}}"
+				name_from_labels "{{label \"com.docker.compose.project\"}}.{{label \"com.docker.compose.service\"}}"
+			}`,
+			shouldErr:         false,
+			expectedTemplates: 3,
+		},
+		{
+			name: "no argument",
+			input: `docker {
+				name_from_labels
+			}`,
+			shouldErr: true,
+		},
+		{
+			name: "malformed template",
+			input: `docker {
+				name_from_labels "{{label \"com.dokku.app-name\""
+			}`,
+			shouldErr: true,
+		},
+		{
+			name: "empty quoted template",
+			input: `docker {
+				name_from_labels ""
+			}`,
+			shouldErr: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			c := caddy.NewTestController("dns", test.input)
+			d := &Docker{
+				labelPrefix: "com.dokku.coredns-docker",
+				maxBackoff:  60 * time.Second,
+				ttl:         DefaultTTL,
+				zones:       []string{"docker."},
+			}
+			err := parse(c, d)
+
+			if test.shouldErr {
+				if err == nil {
+					t.Fatalf("expected error but got none (templates=%d)", len(d.nameTemplates))
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected no error but got %v", err)
+			}
+			if len(d.nameTemplates) != test.expectedTemplates {
+				t.Errorf("expected %d templates, got %d", test.expectedTemplates, len(d.nameTemplates))
+			}
+		})
+	}
+}

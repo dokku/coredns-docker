@@ -32,8 +32,8 @@ func setup(c *caddy.Controller) error {
 	if err := parse(c, d); err != nil {
 		return plugin.Error(pluginName, err)
 	}
-	log.Debugf("Configuration: zones=[%s], ttl=%d, label_prefix=%q, networks=[%s], max_backoff=%s, host_mode=%t, host_mode_ptr=%t",
-		strings.Join(d.zones, ", "), d.ttl, d.labelPrefix, strings.Join(d.networks, ", "), d.maxBackoff, d.hostMode, d.hostModePTR)
+	log.Debugf("Configuration: zones=[%s], ttl=%d, label_prefix=%q, networks=[%s], max_backoff=%s, host_mode=%t, host_mode_ptr=%t, name_templates=%d",
+		strings.Join(d.zones, ", "), d.ttl, d.labelPrefix, strings.Join(d.networks, ", "), d.maxBackoff, d.hostMode, d.hostModePTR, len(d.nameTemplates))
 
 	// Create a new Docker client.
 	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
@@ -130,6 +130,17 @@ func parse(c *caddy.Controller, d *Docker) error {
 					}
 					d.zones = append(d.zones, z)
 				}
+			case "name_from_labels":
+				args := c.RemainingArgs()
+				if len(args) == 0 {
+					return c.ArgErr()
+				}
+				body := strings.Join(args, " ")
+				tmpl, err := parseNameTemplate(body)
+				if err != nil {
+					return c.Errf("error parsing name_from_labels template: %v", err)
+				}
+				d.nameTemplates = append(d.nameTemplates, tmpl)
 			default:
 				return c.Errf("unknown property '%s'", selector)
 			}

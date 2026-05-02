@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net"
 	"reflect"
+	"sort"
 	"testing"
+	"text/template"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
@@ -4850,4 +4852,113 @@ func TestGenerateRecords(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGenerateRecordsNameFromLabels(t *testing.T) {
+	mustTmpl := func(body string) *template.Template {
+		tmpl, err := parseNameTemplate(body)
+		if err != nil {
+			t.Fatalf("parseNameTemplate(%q): %v", body, err)
+		}
+		return tmpl
+	}
+
+	makeContainer := func(name, ip string, labels map[string]string) (string, container.InspectResponse) {
+		return name, container.InspectResponse{
+			ContainerJSONBase: &container.ContainerJSONBase{
+				Name: "/" + name,
+				HostConfig: &container.HostConfig{
+					NetworkMode: container.NetworkMode("bridge"),
+				},
+			},
+			Config: &container.Config{Labels: labels},
+			NetworkSettings: &container.NetworkSettings{
+				Networks: map[string]*network.EndpointSettings{
+					"bridge": {IPAddress: ip},
+				},
+			},
+		}
+	}
+
+	dokkuLabels := func(process string) map[string]string {
+		return map[string]string{
+			"com.dokku.app-name":     "docs",
+			"com.dokku.process-type": process,
+		}
+	}
+
+	id1, c1 := makeContainer("docs.web.1", "172.17.0.4", dokkuLabels("web"))
+	id2, c2 := makeContainer("docs.web.2", "172.17.0.14", dokkuLabels("web"))
+	id3, c3 := makeContainer("docs.web.3", "172.17.0.16", dokkuLabels("web"))
+	id4, c4 := makeContainer("docs.worker.1", "172.17.0.20", dokkuLabels("worker"))
+	id5, c5 := makeContainer("untagged", "172.17.0.30", map[string]string{})
+
+	input := GenerateRecordsInput{
+		Inspector: &mockContainerInspector{
+			inspections: map[string]container.InspectResponse{
+				id1: c1, id2: c2, id3: c3, id4: c4, id5: c5,
+			},
+		},
+		Containers: []container.Summary{
+			{ID: id1}, {ID: id2}, {ID: id3}, {ID: id4}, {ID: id5},
+		},
+		Zones:       []string{"docker."},
+		LabelPrefix: "com.dokku.coredns-docker",
+		NameTemplates: []*template.Template{
+			mustTmpl(`{{label "com.dokku.app-name"}}.{{label "com.dokku.process-type"}}`),
+			mustTmpl(`{{label "com.dokku.app-name"}}`),
+		},
+	}
+
+	records, _, _, _, _ := generateRecords(context.Background(), input)
+
+	assertIPs := func(fqdn string, want ...string) {
+		t.Helper()
+		got, ok := records[fqdn]
+		if !ok {
+			t.Errorf("expected records for %s, none found", fqdn)
+			return
+		}
+		gotStrs := make([]string, len(got))
+		for i, ip := range got {
+			gotStrs[i] = ip.String()
+		}
+		sort.Strings(gotStrs)
+		wantSorted := append([]string(nil), want...)
+		sort.Strings(wantSorted)
+		if !reflect.DeepEqual(gotStrs, wantSorted) {
+			t.Errorf("for %s: got %v, want %v", fqdn, gotStrs, wantSorted)
+		}
+	}
+
+	// docs.web (the {{label app}}.{{label process}} template) collects all
+	// three web dynos.
+	assertIPs("docs.web.docker.", "172.17.0.4", "172.17.0.14", "172.17.0.16")
+
+	// docs (the {{label app}} template) collects every container that
+	// carries the app-name label, which is all four Dokku containers.
+	assertIPs("docs.docker.", "172.17.0.4", "172.17.0.14", "172.17.0.16", "172.17.0.20")
+
+	// docs.worker collects just the worker container.
+	assertIPs("docs.worker.docker.", "172.17.0.20")
+
+	// The untagged container does not contribute to either templated FQDN
+	// (both reference labels it does not carry) but is still reachable
+	// under its container name.
+	if _, ok := records["untagged.docker."]; !ok {
+		t.Errorf("expected per-container record for untagged.docker.")
+	}
+	if ips, ok := records["docs.web.docker."]; ok {
+		for _, ip := range ips {
+			if ip.String() == "172.17.0.30" {
+				t.Errorf("untagged container leaked into docs.web.docker.")
+			}
+		}
+	}
+
+	// Per-container names are unaffected: each docs.web.N still resolves
+	// to exactly its own IP.
+	assertIPs("docs.web.1.docker.", "172.17.0.4")
+	assertIPs("docs.web.2.docker.", "172.17.0.14")
+	assertIPs("docs.web.3.docker.", "172.17.0.16")
 }

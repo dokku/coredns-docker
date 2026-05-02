@@ -1,0 +1,36 @@
+# name_from_labels example: collapse multiple containers onto one DNS name
+# using labels they already carry, without a custom plugin label.
+#
+# Start CoreDNS:
+#   coredns-docker -conf Corefile
+# Start the three containers:
+#   docker compose up -d
+#
+# Verify the multi-A response (three IPs in one answer):
+#   dig @127.0.0.1 -p 1053 docs.web.docker +short
+#   dig @127.0.0.1 -p 1053 docs.docker +short
+#
+# Per-container names still resolve to a single IP each:
+#   dig @127.0.0.1 -p 1053 docs-web-1.docker +short
+
+name: name-from-labels-example
+
+services:
+  web1:
+    image: nginx:alpine
+    container_name: docs-web-1
+    labels:
+      com.dokku.app-name: "docs"
+      com.dokku.process-type: "web"
+  web2:
+    image: nginx:alpine
+    container_name: docs-web-2
+    labels:
+      com.dokku.app-name: "docs"
+      com.dokku.process-type: "web"
+  web3:
+    image: nginx:alpine
+    container_name: docs-web-3
+    labels:
+      com.dokku.app-name: "docs"
+      com.dokku.process-type: "web"

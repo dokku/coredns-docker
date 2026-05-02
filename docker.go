@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"text/template"
 	"time"
 
 	"github.com/coredns/coredns/plugin"
@@ -38,14 +39,15 @@ type Docker struct {
 
 	Fall fall.F
 
-	ttl         uint32
-	client      *client.Client
-	zones       []string
-	labelPrefix string
-	maxBackoff  time.Duration
-	networks    []string
-	hostMode    bool
-	hostModePTR bool
+	ttl           uint32
+	client        *client.Client
+	zones         []string
+	labelPrefix   string
+	maxBackoff    time.Duration
+	networks      []string
+	hostMode      bool
+	hostModePTR   bool
+	nameTemplates []*template.Template
 
 	mu           sync.RWMutex
 	records      map[string][]net.IP
@@ -428,13 +430,14 @@ func (d *Docker) syncRecords(ctx context.Context) {
 	log.Debugf("Found %d running containers", len(containers))
 
 	newRecords, newSrvs, newPtrs, newCnames, newTxts := generateRecords(ctx, GenerateRecordsInput{
-		Containers:  containers,
-		Zones:       d.zones,
-		Inspector:   d.client,
-		LabelPrefix: d.labelPrefix,
-		Networks:    d.networks,
-		HostMode:    d.hostMode,
-		HostModePTR: d.hostModePTR,
+		Containers:    containers,
+		Zones:         d.zones,
+		Inspector:     d.client,
+		LabelPrefix:   d.labelPrefix,
+		Networks:      d.networks,
+		HostMode:      d.hostMode,
+		HostModePTR:   d.hostModePTR,
+		NameTemplates: d.nameTemplates,
 	})
 
 	d.mu.Lock()
@@ -481,6 +484,12 @@ type GenerateRecordsInput struct {
 	// Off by default because multiple containers may share a host IP
 	// (especially the loopback fallback), making reverse lookups noisy.
 	HostModePTR bool
+	// NameTemplates are Go text/templates that synthesize additional
+	// names for each container from its Docker labels. Each template is
+	// evaluated independently per container and any non-empty result
+	// joins the container's name set alongside container name, network
+	// aliases, DNSNames, Compose project.service, and hostname labels.
+	NameTemplates []*template.Template
 }
 
 // unescapeTxtCharString processes RFC 1035 §5.1 character-string
@@ -655,6 +664,13 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 			}
 		}
 
+		// Render every configured name_from_labels template against this
+		// container's labels. Results join the same name set as container
+		// name, network aliases, DNSNames, Compose project.service, and
+		// hostname-label names; the existing case-insensitive dedup below
+		// drops overlap.
+		templatedNames := renderNameTemplates(input.NameTemplates, baseName, c.ID, inspect.Config.Labels)
+
 		// Parse wildcard label
 		wildcardLabel := input.LabelPrefix + "/wildcard"
 		if input.LabelPrefix == "" {
@@ -729,6 +745,7 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 				names = append(names, project+"."+service)
 			}
 			names = append(names, hostnameNames...)
+			names = append(names, templatedNames...)
 
 			seen := make(map[string]bool, len(names))
 			uniqueNames := names[:0]
@@ -827,6 +844,7 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 				names = append(names, project+"."+service)
 			}
 			names = append(names, hostnameNames...)
+			names = append(names, templatedNames...)
 
 			// Deduplicate names (same rules as the default path).
 			seen := make(map[string]bool, len(names))
@@ -1069,6 +1087,7 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 			}
 
 			names = append(names, hostnameNames...)
+			names = append(names, templatedNames...)
 
 			// Deduplicate names (case-insensitive, preserving insertion order) to
 			// avoid producing duplicate records when a container's name overlaps
