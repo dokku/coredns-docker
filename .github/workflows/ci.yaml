@@ -22,7 +22,7 @@ jobs:
       gitcommit: ${{ steps.metadata.outputs.gitcommit }}
       version: ${{ steps.metadata.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: "go.mod"
@@ -73,7 +73,7 @@ jobs:
           - {goos: linux, goarch: mips}
           - {goos: linux, goarch: riscv64}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: "go.mod"
@@ -106,7 +106,7 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
       NAME: coredns-docker
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
           go-version-file: "go.mod"
