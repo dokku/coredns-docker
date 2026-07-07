@@ -65,6 +65,7 @@ teardown_file() {
   # Remove test networks
   docker network rm "$TEST_NETWORK" 2>/dev/null || true
   docker network rm coredns-e2e-unmonitored 2>/dev/null || true
+  docker network rm coredns-e2e-ipv6net 2>/dev/null || true
 
   # Remove temp Corefile
   if [[ -n "$COREFILE" ]]; then
@@ -253,6 +254,78 @@ assert_output_contains() {
   assert_output_contains "ANSWER: 0"
 
   docker rm -f coredns-e2e-v4only
+}
+
+@test "[e2e] AAAA record: IPv6-enabled container resolves and reverses" {
+  local IPV6_NETWORK="coredns-e2e-ipv6net"
+  local IPV6_PORT=15360
+  local IPV6_COREFILE
+  IPV6_COREFILE="$(mktemp /tmp/Corefile.ipv6.XXXXXX)"
+
+  # Create a dual-stack network. Skip when the daemon cannot create IPv6
+  # networks (e.g. CI without IPv6 support) instead of failing the suite.
+  docker network rm "$IPV6_NETWORK" 2>/dev/null || true
+  if ! docker network create --ipv6 --subnet fd00:dead:beef::/64 "$IPV6_NETWORK"; then
+    rm -f "$IPV6_COREFILE"
+    skip "daemon cannot create IPv6 networks"
+  fi
+
+  # Dedicated CoreDNS instance monitoring the IPv6 network on its own port.
+  cat >"$IPV6_COREFILE" <<EOF
+${COREDNS_ZONE}:${IPV6_PORT} in-addr.arpa:${IPV6_PORT} ip6.arpa:${IPV6_PORT} {
+    log
+    errors
+    debug
+    docker {
+        zone ${COREDNS_ZONE}
+        ttl 10
+        networks bridge ${IPV6_NETWORK}
+    }
+}
+EOF
+
+  "$COREDNS_BINARY" -conf "$IPV6_COREFILE" &
+  local IPV6_PID=$!
+
+  local retries=20 i=0
+  while [ "$i" -lt "$retries" ]; do
+    if dig +short +time=1 +tries=1 @127.0.0.1 -p "$IPV6_PORT" version.bind chaos txt >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+
+  docker run -d --name coredns-e2e-ipv6 --network "$IPV6_NETWORK" alpine sleep 3600
+
+  local expected_ip
+  expected_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"${IPV6_NETWORK}\").GlobalIPv6Address}}" coredns-e2e-ipv6)
+
+  if [[ -z "$expected_ip" ]]; then
+    docker rm -f coredns-e2e-ipv6
+    kill "$IPV6_PID" 2>/dev/null || true
+    wait "$IPV6_PID" 2>/dev/null || true
+    rm -f "$IPV6_COREFILE"
+    docker network rm "$IPV6_NETWORK" 2>/dev/null || true
+    skip "container did not receive a GlobalIPv6Address"
+  fi
+
+  # AAAA forward lookup returns the container's global IPv6 address.
+  run wait_for_record_on_port "coredns-e2e-ipv6.${COREDNS_ZONE}" "AAAA" "$IPV6_PORT"
+  assert_success
+  assert_equal "$expected_ip" "$output"
+
+  # ip6.arpa PTR resolves back to the container FQDN.
+  run dig +short +time=2 +tries=1 @127.0.0.1 -p "$IPV6_PORT" -x "$expected_ip"
+  assert_success
+  assert_output_contains "coredns-e2e-ipv6.${COREDNS_ZONE}."
+
+  # Cleanup
+  docker rm -f coredns-e2e-ipv6
+  kill "$IPV6_PID" 2>/dev/null || true
+  wait "$IPV6_PID" 2>/dev/null || true
+  rm -f "$IPV6_COREFILE"
+  docker network rm "$IPV6_NETWORK" 2>/dev/null || true
 }
 
 @test "[e2e] nonexistent container: query returns NXDOMAIN" {

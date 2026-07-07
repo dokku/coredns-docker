@@ -94,6 +94,186 @@ func TestGenerateRecords(t *testing.T) {
 			},
 		},
 		{
+			name: "dual-stack container emits A and AAAA records",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress:           "172.17.0.2",
+										GlobalIPv6Address:   "2001:db8::2",
+										GlobalIPv6PrefixLen: 64,
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: generateRecordsExpected{
+				// IPv4 is parsed first, so the slice is ordered [v4, v6]. The
+				// A-vs-AAAA split happens at serve time via ip.To4().
+				records: map[string][]net.IP{
+					"web.docker.": {net.ParseIP("172.17.0.2"), net.ParseIP("2001:db8::2")},
+				},
+				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{
+					mustReverseAddr("172.17.0.2"):  {"web.docker."},
+					mustReverseAddr("2001:db8::2"): {"web.docker."},
+				},
+			},
+		},
+		{
+			name: "IPv6-only container emits AAAA record",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										GlobalIPv6Address:   "2001:db8::2",
+										GlobalIPv6PrefixLen: 64,
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: generateRecordsExpected{
+				// An IPv6-only network leaves IPAddress empty; only the AAAA
+				// record and its ip6.arpa PTR are emitted.
+				records: map[string][]net.IP{
+					"web.docker.": {net.ParseIP("2001:db8::2")},
+				},
+				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{
+					mustReverseAddr("2001:db8::2"): {"web.docker."},
+				},
+			},
+		},
+		{
+			name: "invalid GlobalIPv6Address is skipped but IPv4 still emitted",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress:         "172.17.0.2",
+										GlobalIPv6Address: "not-an-ip",
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: generateRecordsExpected{
+				// A bad IPv6 address is skipped individually, so the valid
+				// IPv4 record is still emitted rather than the whole network
+				// being dropped.
+				records: map[string][]net.IP{
+					"web.docker.": {net.ParseIP("172.17.0.2")},
+				},
+				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{mustReverseAddr("172.17.0.2"): {"web.docker."}},
+			},
+		},
+		{
+			name: "dual-stack container with wildcard emits wildcard A and AAAA",
+			input: GenerateRecordsInput{
+				Inspector: &mockContainerInspector{
+					inspections: map[string]container.InspectResponse{
+						"container1": {
+							ContainerJSONBase: &container.ContainerJSONBase{
+								Name: "/web",
+								HostConfig: &container.HostConfig{
+									NetworkMode: container.NetworkMode("bridge"),
+								},
+							},
+							Config: &container.Config{
+								Labels: map[string]string{
+									"com.dokku.coredns-docker/wildcard": "true",
+								},
+							},
+							NetworkSettings: &container.NetworkSettings{
+								Networks: map[string]*network.EndpointSettings{
+									"bridge": {
+										IPAddress:           "172.17.0.2",
+										GlobalIPv6Address:   "2001:db8::2",
+										GlobalIPv6PrefixLen: 64,
+									},
+								},
+							},
+						},
+					},
+				},
+				Containers: []container.Summary{
+					{ID: "container1"},
+				},
+				Zones:       []string{"docker."},
+				LabelPrefix: "com.dokku.coredns-docker",
+			},
+			expected: generateRecordsExpected{
+				records: map[string][]net.IP{
+					"web.docker.":   {net.ParseIP("172.17.0.2"), net.ParseIP("2001:db8::2")},
+					"*.web.docker.": {net.ParseIP("172.17.0.2"), net.ParseIP("2001:db8::2")},
+				},
+				srvs: map[string][]srvRecord{},
+				ptrs: map[string][]string{
+					mustReverseAddr("172.17.0.2"):  {"web.docker."},
+					mustReverseAddr("2001:db8::2"): {"web.docker."},
+				},
+			},
+		},
+		{
 			name: "container with network aliases",
 			input: GenerateRecordsInput{
 				Inspector: &mockContainerInspector{

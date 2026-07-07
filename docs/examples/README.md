@@ -43,4 +43,5 @@ Each directory in this folder is a runnable demonstration of a specific feature.
 | [09-multiple-zones](09-multiple-zones) | Serving multiple zones from one Corefile |
 | [10-fallthrough](10-fallthrough) | `fallthrough` to the `forward` plugin for upstream resolution |
 | [11-name-from-labels](11-name-from-labels) | `name_from_labels` collapsing multiple containers onto a single multi-A name |
+| [12-ipv6](12-ipv6) | `enable_ipv6` network resolving a container's AAAA record and `ip6.arpa` PTR |
 | [nginx-integration](nginx-integration) | nginx reverse proxy resolving backends via CoreDNS |

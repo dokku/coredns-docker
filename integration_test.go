@@ -344,6 +344,79 @@ func TestIntegrationNetworkAlias(t *testing.T) {
 	}
 }
 
+func TestIntegrationIPv6AAAARecord(t *testing.T) {
+	networkName := testNetworkPrefix + "ipv6"
+	d, cli := setupIntegrationDocker(t, []string{networkName})
+	ctx := context.Background()
+
+	// Create an IPv6-enabled network. EnableIPv6 is a *bool in the Docker API,
+	// and an explicit IPv6 subnet is required. Skip the test gracefully when
+	// the daemon cannot create IPv6 networks (common in CI without IPv6).
+	enableIPv6 := true
+	netResp, err := cli.NetworkCreate(ctx, networkName, network.CreateOptions{
+		Driver:     "bridge",
+		EnableIPv6: &enableIPv6,
+		IPAM: &network.IPAM{
+			Config: []network.IPAMConfig{
+				{Subnet: "fd00:dead:beef::/64"},
+			},
+		},
+	})
+	if err != nil {
+		t.Skipf("Skipping IPv6 test: cannot create IPv6 network: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cli.NetworkRemove(context.Background(), netResp.ID)
+	})
+
+	name := testContainerName(t, "")
+	createTestContainer(t, cli, name, &container.Config{
+		Image: "alpine:latest",
+		Cmd:   []string{"sleep", "3600"},
+	}, &container.HostConfig{
+		NetworkMode: container.NetworkMode(networkName),
+	}, &network.NetworkingConfig{
+		EndpointsConfig: map[string]*network.EndpointSettings{
+			networkName: {},
+		},
+	})
+
+	// Read the container's assigned global IPv6 address to compare against. If
+	// the daemon accepted the network but did not assign an IPv6 address, IPv6
+	// is not functional here, so skip rather than fail.
+	inspect, err := cli.ContainerInspect(ctx, name)
+	if err != nil {
+		t.Fatalf("Failed to inspect container %s: %v", name, err)
+	}
+	epSettings, ok := inspect.NetworkSettings.Networks[networkName]
+	if !ok || epSettings.GlobalIPv6Address == "" {
+		t.Skip("Skipping IPv6 test: container has no GlobalIPv6Address (daemon IPv6 not functional)")
+	}
+	wantIP := net.ParseIP(epSettings.GlobalIPv6Address)
+
+	d.syncRecords(ctx)
+
+	fqdn := name + ".docker."
+	resp, _, err := queryDNS(t, d, fqdn, dns.TypeAAAA)
+	if err != nil {
+		t.Fatalf("ServeDNS error for %s: %v", fqdn, err)
+	}
+	if resp == nil || len(resp.Answer) == 0 {
+		t.Fatalf("expected at least one AAAA record for %s, got none", fqdn)
+	}
+
+	aaaa, ok := resp.Answer[0].(*dns.AAAA)
+	if !ok {
+		t.Fatalf("expected AAAA record, got %T", resp.Answer[0])
+	}
+	if aaaa.AAAA == nil || aaaa.AAAA.To4() != nil {
+		t.Fatalf("expected a valid IPv6 address, got %v", aaaa.AAAA)
+	}
+	if !aaaa.AAAA.Equal(wantIP) {
+		t.Errorf("expected AAAA %s, got %s", wantIP, aaaa.AAAA)
+	}
+}
+
 func TestIntegrationFallthrough(t *testing.T) {
 	d, cli := setupIntegrationDocker(t, nil)
 	d.Fall = fall.Root

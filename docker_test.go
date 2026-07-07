@@ -35,6 +35,9 @@ func TestDocker(t *testing.T) {
 			"ipv6.docker.":         {net.ParseIP("2001:db8::1")},
 			"multi.docker.":        {net.ParseIP("172.17.0.4"), net.ParseIP("172.17.0.5")},
 			"myproj.mysvc.docker.": {net.ParseIP("172.17.0.6")},
+			// Dual-stack name: an A query must return only the IPv4 and an
+			// AAAA query only the IPv6, since both live in the same slice.
+			"dual.docker.": {net.ParseIP("172.17.0.7"), net.ParseIP("2001:db8::7")},
 		},
 		srvs: map[string][]srvRecord{
 			"_http._tcp.web.docker.": {
@@ -93,6 +96,24 @@ func TestDocker(t *testing.T) {
 			Rcode: dns.RcodeSuccess,
 			Answer: []dns.RR{
 				test.AAAA("ipv6.docker.	30	IN	AAAA	2001:db8::1"),
+			},
+		},
+		{
+			// Dual-stack: A query returns only the IPv4 address.
+			Qname: "dual.docker.",
+			Qtype: dns.TypeA,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.A("dual.docker.	30	IN	A	172.17.0.7"),
+			},
+		},
+		{
+			// Dual-stack: AAAA query returns only the IPv6 address.
+			Qname: "dual.docker.",
+			Qtype: dns.TypeAAAA,
+			Rcode: dns.RcodeSuccess,
+			Answer: []dns.RR{
+				test.AAAA("dual.docker.	30	IN	AAAA	2001:db8::7"),
 			},
 		},
 		{
