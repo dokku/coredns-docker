@@ -66,14 +66,17 @@ This produces the full build matrix under `build/` and `.deb` packages under `bu
 
 ## Docker image
 
-The repository ships a `Dockerfile.hub` that wraps the Linux amd64 binary in a `scratch` image. There is no automatically published image, so you need to build it yourself after running `make build`:
+Each release publishes a multi-arch image to Docker Hub at [`dokku/coredns-docker`](https://hub.docker.com/r/dokku/coredns-docker). `latest` tracks the newest release, and every release also gets an immutable version tag:
 
 ```bash
-make build
-docker build -t coredns-docker:local -f Dockerfile.hub .
+docker pull dokku/coredns-docker:latest
+# or pin a version
+docker pull dokku/coredns-docker:0.6.1
 ```
 
-Then run CoreDNS in a container, bind-mounting your `Corefile` and the Docker socket:
+The manifest covers `linux/amd64`, `linux/arm64`, `linux/arm/v7`, `linux/ppc64le`, `linux/s390x`, `linux/riscv64`, `linux/mips`, and `linux/mips64le`, so `docker pull` selects the right binary for your host automatically. Each image is a `scratch` image containing only the static CoreDNS binary, and carries SLSA build provenance and an SBOM you can inspect with `docker buildx imagetools inspect dokku/coredns-docker:latest`.
+
+Run CoreDNS in a container, bind-mounting your `Corefile` and the Docker socket:
 
 ```bash
 docker run --rm -d \
@@ -81,10 +84,19 @@ docker run --rm -d \
     -p 1053:1053/udp -p 1053:1053/tcp \
     -v "$PWD/Corefile:/Corefile:ro" \
     -v /var/run/docker.sock:/var/run/docker.sock:ro \
-    coredns-docker:local -conf /Corefile
+    dokku/coredns-docker:latest -conf /Corefile
 ```
 
 **Why mount the Docker socket?** The plugin uses the Docker API to list containers and subscribe to events. Without the socket inside the container, there is nothing for it to listen to. The mount is `:ro` because the plugin only needs to read container state.
+
+**Building the image yourself.** The repository ships the `Dockerfile.hub` that the release uses. It selects the binary for the target architecture (`TARGETARCH`) out of `build/linux/`, so build it after `make build`:
+
+```bash
+make build
+docker build -t coredns-docker:local -f Dockerfile.hub .
+```
+
+That produces a single image for your host architecture. To assemble the full multi-arch manifest locally, create a `docker-container` builder once (`docker buildx create --use`) and run `make build-hub-image`.
 
 ## Verifying the install
 

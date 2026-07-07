@@ -7,6 +7,7 @@ HARDWARE = $(shell uname -m)
 SYSTEM_NAME  = $(shell uname -s | tr '[:upper:]' '[:lower:]')
 BASE_VERSION ?= 0.1.0
 IMAGE_NAME ?= $(MAINTAINER)/$(REPOSITORY)
+DOCKER_PLATFORMS ?= linux/amd64,linux/arm64,linux/arm/v7,linux/ppc64le,linux/s390x,linux/riscv64,linux/mips,linux/mips64le
 PACKAGECLOUD_REPOSITORY ?= dokku/dokku-betafish
 
 ifeq ($(CI_BRANCH),release)
@@ -86,6 +87,14 @@ build:
 
 build-docker-image:
 	docker build --rm -q -f Dockerfile -t $(IMAGE_NAME):build .
+
+.PHONY: build-hub-image
+build-hub-image:
+	docker buildx build --provenance=false --platform $(DOCKER_PLATFORMS) -f Dockerfile.hub -t $(IMAGE_NAME):$(DOCKER_IMAGE_VERSION) .
+
+.PHONY: release-hub-image
+release-hub-image:
+	docker buildx build --provenance=mode=max --sbom=true --push --platform $(DOCKER_PLATFORMS) -f Dockerfile.hub -t $(IMAGE_NAME):$(DOCKER_IMAGE_VERSION) -t $(IMAGE_NAME):latest .
 
 $(targets): %-in-docker: .env.docker
 	docker run \
@@ -240,6 +249,10 @@ test:
 .PHONY: test-e2e
 test-e2e: build-local
 	bats e2e.bats
+
+.PHONY: test-docker
+test-docker:
+	bats docker.bats
 
 .PHONY: test-integration
 test-integration:

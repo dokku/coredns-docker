@@ -1,3 +1,7 @@
 Dockerfile*
 LICENSE
 README.md
+.coredns-build
+.git
+coverage.out
+tmp

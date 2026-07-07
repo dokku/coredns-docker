@@ -66,6 +66,30 @@ make test-e2e
 #  ...
 ```
 
+## Docker image
+
+```bash
+make test-docker
+```
+
+This runs `bats docker.bats`, which builds the `Dockerfile.hub` image for your host architecture (via `docker buildx build --load`) and asserts that the `docker` plugin is compiled in by running the image with `-plugins` and checking that the plugin is listed. It is the same check the CI `docker` job runs before it validates the full multi-arch build.
+
+**When to use it:** any change to `Dockerfile.hub`, the `build-hub-image`/`release-hub-image` targets, or the release pipeline that publishes the image to Docker Hub.
+
+**Requirements:**
+
+- A running Docker daemon with `buildx`
+- [bats-core](https://github.com/bats-core/bats-core) 1.5 or newer
+- The output of `make build` (the test copies `build/linux/coredns-docker-<arch>` into the image and skips cleanly if that binary is missing)
+
+**Example:**
+
+```bash
+make build
+make test-docker
+#  ✓ hub image reports the docker plugin
+```
+
 ## Coverage
 
 ```bash

@@ -1,3 +1,4 @@
 FROM scratch
-COPY ./build/linux/coredns-docker-amd64 /coredns-docker
+ARG TARGETARCH
+COPY ./build/linux/coredns-docker-${TARGETARCH} /coredns-docker
 ENTRYPOINT ["/coredns-docker"]
