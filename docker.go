@@ -1067,15 +1067,27 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 
 		// Generate records for each matching network
 		for _, ne := range networksToProcess {
-			ip := net.ParseIP(ne.settings.IPAddress)
-			if ip == nil {
-				log.Debugf("Container %s has invalid IP address %s on network %s", c.ID, ne.settings.IPAddress, ne.name)
-				continue
+			// Collect the endpoint's IPs. Docker stores the IPv4 address in
+			// IPAddress and the container's global IPv6 address in the separate
+			// GlobalIPv6Address field, so a dual-stack container needs both read
+			// to answer A and AAAA queries. GlobalIPv6Address is empty on
+			// IPv4-only networks, so IPv4-only containers are unaffected. The
+			// A-vs-AAAA split happens at serve time via ip.To4(), so both types
+			// live in the same records slice here.
+			var endpointIPs []net.IP
+			for _, ipStr := range []string{ne.settings.IPAddress, ne.settings.GlobalIPv6Address} {
+				if ipStr == "" {
+					continue
+				}
+				ip := net.ParseIP(ipStr)
+				if ip == nil {
+					log.Debugf("Container %s has invalid IP address %s on network %s", c.ID, ipStr, ne.name)
+					continue
+				}
+				endpointIPs = append(endpointIPs, ip)
 			}
-
-			arpa, arpaErr := dns.ReverseAddr(ip.String())
-			if arpaErr != nil {
-				log.Debugf("Container %s has IP %s that cannot be reversed: %v", c.ID, ip.String(), arpaErr)
+			if len(endpointIPs) == 0 {
+				continue
 			}
 
 			names := []string{baseName}
@@ -1111,19 +1123,27 @@ func generateRecords(ctx context.Context, input GenerateRecordsInput) (map[strin
 					if !strings.HasSuffix(fqdn, ".") {
 						fqdn += "."
 					}
-					// Dedup at the record level to also cover the edge case where
-					// two networks assign the same IP to the same container.
-					if !slices.ContainsFunc(newRecords[fqdn], ip.Equal) {
-						newRecords[fqdn] = append(newRecords[fqdn], ip)
-					}
-					if arpaErr == nil && !slices.Contains(newPtrs[arpa], fqdn) {
-						newPtrs[arpa] = append(newPtrs[arpa], fqdn)
-					}
+					// Emit an A/AAAA record and matching PTR for each of the
+					// endpoint's IPs (IPv4 and, when present, IPv6). Dedup at the
+					// record level also covers the edge case where two networks
+					// assign the same IP to the same container.
+					for _, ip := range endpointIPs {
+						if !slices.ContainsFunc(newRecords[fqdn], ip.Equal) {
+							newRecords[fqdn] = append(newRecords[fqdn], ip)
+						}
 
-					if enableWildcard {
-						wildcardFqdn := "*." + fqdn
-						if !slices.ContainsFunc(newRecords[wildcardFqdn], ip.Equal) {
-							newRecords[wildcardFqdn] = append(newRecords[wildcardFqdn], ip)
+						arpa, arpaErr := dns.ReverseAddr(ip.String())
+						if arpaErr != nil {
+							log.Debugf("Container %s has IP %s that cannot be reversed: %v", c.ID, ip.String(), arpaErr)
+						} else if !slices.Contains(newPtrs[arpa], fqdn) {
+							newPtrs[arpa] = append(newPtrs[arpa], fqdn)
+						}
+
+						if enableWildcard {
+							wildcardFqdn := "*." + fqdn
+							if !slices.ContainsFunc(newRecords[wildcardFqdn], ip.Equal) {
+								newRecords[wildcardFqdn] = append(newRecords[wildcardFqdn], ip)
+							}
 						}
 					}
 

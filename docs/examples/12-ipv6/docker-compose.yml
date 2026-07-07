@@ -1,0 +1,36 @@
+# IPv6 example: resolve a dual-stack container's AAAA record (and its ip6.arpa PTR).
+#
+# The "ipv6net" network sets enable_ipv6 with an IPv6 subnet, so the container
+# receives both an IPv4 and a global IPv6 address. The plugin emits an A record
+# for the IPv4 and an AAAA record for the IPv6, plus PTR records in both reverse
+# zones.
+#
+# Requires a Docker daemon with IPv6 enabled.
+#
+# Start CoreDNS in one terminal:
+#   coredns-docker -conf Corefile
+#
+# Start the demo container in another:
+#   docker compose up -d
+#
+# Verify:
+#   dig @127.0.0.1 -p 1053 web.docker A +short      # IPv4 address
+#   dig @127.0.0.1 -p 1053 web.docker AAAA +short   # global IPv6 address
+#   dig @127.0.0.1 -p 1053 -x "$(docker inspect -f '{{(index .NetworkSettings.Networks "ipv6-example-net").GlobalIPv6Address}}' ipv6-web)" +short
+
+name: ipv6-example
+
+networks:
+  ipv6net:
+    name: ipv6-example-net
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: fd00:dead:beef::/64
+
+services:
+  web:
+    image: nginx:alpine
+    container_name: ipv6-web
+    networks:
+      - ipv6net
