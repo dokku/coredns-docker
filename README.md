@@ -14,6 +14,12 @@ chmod +x coredns-docker
 sudo mv coredns-docker /usr/local/bin/
 ```
 
+Or pull the multi-arch image from Docker Hub:
+
+```bash
+docker pull dokku/coredns-docker:latest
+```
+
 Or build a single binary from source (requires Go):
 
 ```bash

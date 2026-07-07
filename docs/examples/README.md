@@ -26,7 +26,7 @@ Each directory in this folder is a runnable demonstration of a specific feature.
    # then Ctrl-C the CoreDNS terminal
    ```
 
-**Why run CoreDNS on the host and services in Compose?** The plugin needs access to `/var/run/docker.sock` to watch containers. Running CoreDNS on the host avoids any container-in-container DNS bootstrapping issues and keeps the examples minimal. If you would rather run CoreDNS in Compose too, build a local image from `Dockerfile.hub` and add a service that mounts the socket (see [../installation.md](../installation.md#docker-image)).
+**Why run CoreDNS on the host and services in Compose?** The plugin needs access to `/var/run/docker.sock` to watch containers. Running CoreDNS on the host avoids any container-in-container DNS bootstrapping issues and keeps the examples minimal. If you would rather run CoreDNS in Compose too, use the published `dokku/coredns-docker` image (or build a local one from `Dockerfile.hub`) and add a service that mounts the socket (see [../installation.md](../installation.md#docker-image)).
 
 ## Example index
 
