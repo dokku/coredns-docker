@@ -1,9 +1,10 @@
 docker:1053 in-addr.arpa:1053 ip6.arpa:1053 {
-    ready {
+    bind 127.0.0.1
+    ready 127.0.0.1:1055 {
         monitor continuously
     }
     errors
-    health
+    health 127.0.0.1:1054
     log
     docker {
         ttl 10
@@ -13,6 +14,6 @@ docker:1053 in-addr.arpa:1053 ip6.arpa:1053 {
         name_from_labels "{{if hasLabel \"com.dokku.app-name\"}}{{label \"com.dokku.app-name\"}}{{end}}"
         name_from_labels "{{if and (hasLabel \"com.docker.compose.project\") (hasLabel \"com.docker.compose.service\")}}{{label \"com.docker.compose.project\"}}.{{label \"com.docker.compose.service\"}}{{end}}"
     }
-    prometheus :9153
+    prometheus 127.0.0.1:9153
     cache 30
 }
